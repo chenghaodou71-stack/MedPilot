@@ -1,0 +1,54 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Java
+backend/target/
+backend/cp.txt
+backend/run*.log
+backend/config/application.properties
+backend/var/private/attachments/
+backups/
+scripts/.runtime/
+
+# Python
+ai-service/venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE and OS metadata
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local test/runtime artifacts
+.scratch/browser-test/deps/
+.scratch/*.log
+*.log
+
+# Local planning, generated documents, and render output
+.claude/
+.scratch/
+.resume_pdf/
+.resume_render/
+outputs/
+tmp/
+ai-service/.scratch-evaluation-results/
+ai-service/evaluation-results/
+
+# Local academic source material and legacy prototype
+/*.pdf
+/*.docx
+/毕业设计开题报告_*.md
+/课题描述_*.md
+/app.js
+/index.html
+/styles.css
+/soffice.cmd

@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: medpilot-backend
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:validate}
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+medpilot:
+  ai-service-url: ${MEDPILOT_AI_SERVICE_URL:http://127.0.0.1:8000}
+  ai-service-token: ${MEDPILOT_AI_SERVICE_TOKEN}
+  data-encryption-key: ${MEDPILOT_DATA_ENCRYPTION_KEY}
+  attachments:
+    # Prefer the documented plural variable; keep the old singular name as a
+    # compatibility fallback for existing local installations.
+    storage-dir: ${MEDPILOT_ATTACHMENTS_STORAGE_DIR:${MEDPILOT_ATTACHMENT_DIR:./var/private/attachments}}
+    retention-days: ${MEDPILOT_ATTACHMENTS_RETENTION_DAYS:${MEDPILOT_ATTACHMENT_RETENTION_DAYS:30}}
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-ms: 86400000

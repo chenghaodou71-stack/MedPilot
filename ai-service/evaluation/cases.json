@@ -1,0 +1,12 @@
+[
+  {"case_id": "RF01", "text": "患者突然胸痛半小时", "gold_red_flags": ["胸痛"], "gold_department": "心血管内科", "gold_risk": "高"},
+  {"case_id": "RF02", "text": "活动后呼吸困难", "gold_red_flags": ["呼吸困难"], "gold_department": "呼吸内科", "gold_risk": "高"},
+  {"case_id": "RF03", "text": "咳出血丝", "gold_red_flags": ["咯血"], "gold_department": "呼吸内科", "gold_risk": "高"},
+  {"case_id": "RF04", "text": "发现黑便", "gold_red_flags": ["便血"], "gold_department": "消化内科", "gold_risk": "高"},
+  {"case_id": "RF05", "text": "刚才昏倒了", "gold_red_flags": ["晕厥"], "gold_department": "心血管内科", "gold_risk": "高"},
+  {"case_id": "RF06", "text": "家人意识不清", "gold_red_flags": ["意识不清"], "gold_department": "神经内科", "gold_risk": "高"},
+  {"case_id": "RF07", "text": "外伤后大出血", "gold_red_flags": ["大出血"], "gold_department": "急诊科", "gold_risk": "高"},
+  {"case_id": "RF08", "text": "持续气促", "gold_red_flags": ["气促"], "gold_department": "呼吸内科", "gold_risk": "高"},
+  {"case_id": "N01", "text": "最近有点乏力", "gold_red_flags": [], "gold_department": "全科/建议线下分诊台", "gold_risk": "低"},
+  {"case_id": "N02", "text": "没有胸痛，也没有呼吸困难", "gold_red_flags": [], "gold_department": "全科/建议线下分诊台", "gold_risk": "低"}
+]

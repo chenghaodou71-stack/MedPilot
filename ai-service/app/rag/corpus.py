@@ -1,0 +1,142 @@
+"""Reviewed, traceable public-health corpus for MedPilot's four specialties."""
+from __future__ import annotations
+
+
+CORPUS: tuple[dict[str, str], ...] = (
+    {
+        "doc_id": "card-cvd-warning-signs",
+        "department": "心血管内科",
+        "source": "世界卫生组织｜Cardiovascular diseases (CVDs)",
+        "institution": "World Health Organization",
+        "title": "Cardiovascular diseases (CVDs)",
+        "url": "https://www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds)",
+        "published_date": "2021-06-11",
+        "version": "source-2021-06-11/medpilot-2026-08-03",
+        "license": "CC BY-NC-SA 3.0 IGO",
+        "review_status": "approved",
+        "text": (
+            "突发胸部压迫、紧缩或疼痛，并向手臂、左肩、下颌或背部放射，属于需要紧急评估的警示表现。"
+            "若同时出现呼吸困难、出汗、恶心、头晕或晕厥，应立即呼叫急救并避免自行驾车。"
+            "反复心悸、活动后胸部不适或耐力明显下降，建议前往心血管内科进行线下评估。"
+        ),
+    },
+    {
+        "doc_id": "card-hypertension-overview",
+        "department": "心血管内科",
+        "source": "世界卫生组织｜Hypertension",
+        "institution": "World Health Organization",
+        "title": "Hypertension",
+        "url": "https://www.who.int/news-room/fact-sheets/detail/hypertension",
+        "published_date": "2023-03-16",
+        "version": "source-2023-03-16/medpilot-2026-08-03",
+        "license": "CC BY-NC-SA 3.0 IGO",
+        "review_status": "approved",
+        "text": (
+            "血压升高常常没有明显不适，规范测量和持续记录有助于医生判断风险。"
+            "若血压明显异常并伴剧烈头痛、胸痛、呼吸困难、视物异常或意识改变，应尽快接受紧急评估。"
+            "日常可关注盐摄入、规律活动、睡眠和体重，并携带血压记录前往心血管内科咨询。"
+        ),
+    },
+    {
+        "doc_id": "resp-asthma-overview",
+        "department": "呼吸内科",
+        "source": "世界卫生组织｜Asthma",
+        "institution": "World Health Organization",
+        "title": "Asthma",
+        "url": "https://www.who.int/news-room/fact-sheets/detail/asthma",
+        "published_date": "2024-05-06",
+        "version": "source-2024-05-06/medpilot-2026-08-03",
+        "license": "CC BY-NC-SA 3.0 IGO",
+        "review_status": "approved",
+        "text": (
+            "反复喘息、咳嗽、胸闷和气短可能在夜间、清晨、运动后或接触刺激因素后加重。"
+            "记录发作时间、诱因、夜间症状和活动受限情况，可帮助呼吸内科进行评估。"
+            "若出现说话困难、口唇发紫、意识异常或呼吸费力迅速加重，应立即就医。"
+        ),
+    },
+    {
+        "doc_id": "resp-copd-overview",
+        "department": "呼吸内科",
+        "source": "世界卫生组织｜Chronic obstructive pulmonary disease (COPD)",
+        "institution": "World Health Organization",
+        "title": "Chronic obstructive pulmonary disease (COPD)",
+        "url": "https://www.who.int/news-room/fact-sheets/detail/chronic-obstructive-pulmonary-disease-(copd)",
+        "published_date": "2024-11-06",
+        "version": "source-2024-11-06/medpilot-2026-08-03",
+        "license": "CC BY-NC-SA 3.0 IGO",
+        "review_status": "approved",
+        "text": (
+            "长期咳嗽、咳痰、活动后气短和反复呼吸道不适，需要结合吸烟或粉尘暴露史进行线下评估。"
+            "症状逐渐加重或影响日常活动时，建议前往呼吸内科并说明持续时间和诱发因素。"
+            "突发严重呼吸困难、胸痛、咯血或意识异常属于危险信号，应立即就医。"
+        ),
+    },
+    {
+        "doc_id": "gast-reflux-symptoms",
+        "department": "消化内科",
+        "source": "美国国家糖尿病、消化和肾脏疾病研究所｜Symptoms & Causes of GER & GERD",
+        "institution": "National Institute of Diabetes and Digestive and Kidney Diseases",
+        "title": "Symptoms & Causes of GER & GERD in Adults",
+        "url": "https://www.niddk.nih.gov/health-information/digestive-diseases/acid-reflux-ger-gerd-adults/symptoms-causes",
+        "published_date": "2020-07-01",
+        "version": "reviewed-2020-07/medpilot-2026-08-03",
+        "license": "U.S. Government work; public domain unless otherwise noted",
+        "review_status": "approved",
+        "text": (
+            "反酸、烧心、胸骨后灼热感或食物反流可能在餐后、平卧或弯腰时更明显。"
+            "可记录症状与进食、体位和睡眠的关系；反复出现或影响吞咽时，建议前往消化内科评估。"
+            "若伴呕血、黑便、持续胸痛、吞咽困难或体重明显下降，应尽快线下就医。"
+        ),
+    },
+    {
+        "doc_id": "gast-diarrhea-warning-signs",
+        "department": "消化内科",
+        "source": "美国国家糖尿病、消化和肾脏疾病研究所｜Symptoms & Causes of Diarrhea",
+        "institution": "National Institute of Diabetes and Digestive and Kidney Diseases",
+        "title": "Symptoms & Causes of Diarrhea",
+        "url": "https://www.niddk.nih.gov/health-information/digestive-diseases/diarrhea/symptoms-causes",
+        "published_date": "2016-11-01",
+        "version": "reviewed-2016-11/medpilot-2026-08-03",
+        "license": "U.S. Government work; public domain unless otherwise noted",
+        "review_status": "approved",
+        "text": (
+            "腹泻评估需要关注持续时间、排便次数、是否发热、腹痛、呕吐以及近期饮食和旅行情况。"
+            "口干、尿量减少、明显乏力或头晕可能提示脱水，需要及时接受线下评估。"
+            "若出现便血、黑便、持续剧烈腹痛、高热或意识异常，应尽快就医。"
+        ),
+    },
+    {
+        "doc_id": "derm-atopic-eczema",
+        "department": "皮肤科",
+        "source": "英国国家医疗服务体系｜Atopic eczema",
+        "institution": "National Health Service",
+        "title": "Atopic eczema",
+        "url": "https://www.nhs.uk/conditions/atopic-eczema/",
+        "published_date": "2023-02-13",
+        "version": "reviewed-2023-02-13/medpilot-2026-08-03",
+        "license": "Open Government Licence v3.0",
+        "review_status": "approved",
+        "text": (
+            "反复瘙痒、干燥、红斑、脱屑或皮肤皲裂，可记录发生部位、接触因素和是否影响睡眠。"
+            "避免搔抓和已知刺激因素，保持温和清洁；症状持续、范围扩大或反复发作时建议皮肤科评估。"
+            "若皮肤迅速红肿、明显疼痛、渗液结痂并伴全身不适，应及时就医。"
+        ),
+    },
+    {
+        "doc_id": "derm-hives",
+        "department": "皮肤科",
+        "source": "英国国家医疗服务体系｜Hives",
+        "institution": "National Health Service",
+        "title": "Hives",
+        "url": "https://www.nhs.uk/conditions/hives/",
+        "published_date": "2023-04-13",
+        "version": "reviewed-2023-04-13/medpilot-2026-08-03",
+        "license": "Open Government Licence v3.0",
+        "review_status": "approved",
+        "text": (
+            "突然出现的瘙痒性隆起风团可在不同部位出现和消退，评估时可记录食物、感染、接触或物理刺激等线索。"
+            "反复发生、持续不退或影响生活时，建议前往皮肤科线下评估。"
+            "若同时出现口唇或舌部肿胀、喉咙紧缩、呼吸困难、晕厥，应立即呼叫急救。"
+        ),
+    },
+)

@@ -1,0 +1,36 @@
+spring:
+  main:
+    # Integration tests exercise servlet endpoints; defer the optional reactive
+    # client lifecycle so a test does not require a local Netty event loop.
+    lazy-initialization: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  datasource:
+    # A unique database per Spring test context prevents concurrently cached
+    # contexts from dropping each other's tables during the full suite.
+    url: jdbc:h2:mem:medpilot_test_${random.uuid};DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+medpilot:
+  ai-service-token: test-ai-service-token
+  data-encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  jwt:
+    secret: test-secret-key-0123456789abcdef-0123456789abcdef
+    expiration-ms: 900000
+    cookie-secure: false
+  auth:
+    max-failed-attempts: 3
+    failure-window-seconds: 300
+    lock-seconds: 300

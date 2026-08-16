@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS consultation_attachments (
+    id VARCHAR(36) NOT NULL,
+    user_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    storage_key VARCHAR(64) NOT NULL,
+    original_filename TEXT NOT NULL,
+    media_type VARCHAR(100) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    sha256 VARCHAR(64) NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    extracted_text TEXT NULL,
+    draft_text TEXT NULL,
+    confirmed_at TIMESTAMP(6) NULL,
+    created_at TIMESTAMP(6) NOT NULL,
+    expires_at TIMESTAMP(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_consultation_attachments_storage (storage_key),
+    KEY ix_consultation_attachments_owner_session (user_id, session_id, created_at),
+    KEY ix_consultation_attachments_expiry (expires_at)
+);
