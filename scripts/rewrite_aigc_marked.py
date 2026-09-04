@@ -258,6 +258,14 @@ def replace_paragraph(paragraph, new_text: str):
             superscript_rpr[val] = deepcopy(r._element.rPr) if r._element.rPr is not None else None
     for r in old_runs:
         paragraph._p.remove(r._element)
+    def apply_rpr(run, rpr):
+        if rpr is None:
+            return
+        existing = run._element.rPr
+        if existing is not None:
+            run._element.remove(existing)
+        run._element.insert(0, deepcopy(rpr))
+
     citation_set = set(superscript_rpr)
     pattern = r"(\[\d+\]|(?<![A-Za-z])\d+(?![A-Za-z]))"
     pos = 0
@@ -267,18 +275,14 @@ def replace_paragraph(paragraph, new_text: str):
             continue
         if match.start() > pos:
             run = paragraph.add_run(new_text[pos:match.start()])
-            if base_rpr is not None:
-                run._element.get_or_add_rPr().clear_content()
-                run._element.rPr = deepcopy(base_rpr)
+            apply_rpr(run, base_rpr)
         run = paragraph.add_run(token)
         rpr = superscript_rpr.get(token)
-        if rpr is not None:
-            run._element.rPr = deepcopy(rpr)
+        apply_rpr(run, rpr)
         pos = match.end()
     if pos < len(new_text):
         run = paragraph.add_run(new_text[pos:])
-        if base_rpr is not None:
-            run._element.rPr = deepcopy(base_rpr)
+        apply_rpr(run, base_rpr)
     if not paragraph.runs:
         paragraph.add_run(new_text)
 
