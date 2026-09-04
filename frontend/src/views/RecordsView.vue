@@ -14,6 +14,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { buildRecordQuery, emptyRecordFilters, presetDateRange } from '../lib/recordFilters'
 
 const router = useRouter()
 
@@ -21,42 +22,31 @@ const records = ref([])
 const loading = ref(true)
 const loadError = ref('')
 const activeTab = ref('all')
-const searchText = ref('')
-const riskFilter = ref('')
+const recordId = ref('')
+const sessionId = ref('')
+const symptoms = ref('')
+const department = ref('')
+const keyword = ref('')
+const dateRange = ref([])
+const page = ref(0)
+const pageSize = ref(20)
+const total = ref(0)
+const pages = ref(0)
 
-const tabOptions = computed(() => [
-  { value: 'all', label: '全部', count: records.value.length },
-  {
-    value: '7d',
-    label: '近 7 天',
-    count: records.value.filter((record) => isWithinDays(record, 7)).length,
-  },
-  {
-    value: '30d',
-    label: '近 30 天',
-    count: records.value.filter((record) => isWithinDays(record, 30)).length,
-  },
-])
-
-const filteredRecords = computed(() => {
-  const keyword = searchText.value.trim().toLocaleLowerCase('zh-CN')
-
-  return [...records.value]
-    .filter((record) => {
-      if (activeTab.value === '7d' && !isWithinDays(record, 7)) return false
-      if (activeTab.value === '30d' && !isWithinDays(record, 30)) return false
-      if (riskFilter.value && normalizeText(record.riskLevel) !== riskFilter.value) return false
-      if (!keyword) return true
-
-      return [record.symptoms, record.department, record.sessionId]
-        .map((value) => normalizeText(value).toLocaleLowerCase('zh-CN'))
-        .some((value) => value.includes(keyword))
-    })
-    .sort((left, right) => toTimestamp(right.createdAt) - toTimestamp(left.createdAt))
-})
+const tabOptions = [
+  { value: 'all', label: '全部' },
+  { value: '7d', label: '近 7 天' },
+  { value: '30d', label: '近 30 天' },
+]
 
 const hasActiveFilters = computed(
-  () => activeTab.value !== 'all' || Boolean(searchText.value.trim()) || Boolean(riskFilter.value),
+  () => activeTab.value !== 'all'
+    || Boolean(recordId.value.trim())
+    || Boolean(sessionId.value.trim())
+    || Boolean(symptoms.value.trim())
+    || Boolean(department.value.trim())
+    || Boolean(keyword.value.trim())
+    || dateRange.value.length > 0,
 )
 
 async function fetchRecords() {
@@ -64,8 +54,21 @@ async function fetchRecords() {
   loadError.value = ''
 
   try {
-    const response = await client.get('/records')
+    const response = await client.get('/records', {
+      params: buildRecordQuery({
+        recordId: recordId.value,
+        sessionId: sessionId.value,
+        symptoms: symptoms.value,
+        department: department.value,
+        keyword: keyword.value,
+        dateRange: dateRange.value,
+        page: page.value,
+        size: pageSize.value,
+      }),
+    })
     records.value = Array.isArray(response.data?.data) ? response.data.data : []
+    total.value = Number(response.data?.meta?.total) || 0
+    pages.value = Number(response.data?.meta?.pages) || 0
   } catch (error) {
     records.value = []
     loadError.value = error.response?.data?.error || '问诊记录暂时无法加载，请稍后重试。'
@@ -81,13 +84,6 @@ function normalizeText(value) {
 function toTimestamp(value) {
   const timestamp = Date.parse(value)
   return Number.isFinite(timestamp) ? timestamp : 0
-}
-
-function isWithinDays(record, days) {
-  const timestamp = toTimestamp(record?.createdAt)
-  if (!timestamp) return false
-  const elapsed = Date.now() - timestamp
-  return elapsed >= 0 && elapsed <= days * 24 * 60 * 60 * 1000
 }
 
 function formatDate(value) {
@@ -112,10 +108,58 @@ function riskLabel(level) {
   return normalizeText(level) ? `${normalizeText(level)}风险` : '风险待评估'
 }
 
+function reviewStatusLabel(status) {
+  return {
+    PENDING_REVIEW: '待医生复核',
+    IN_REVIEW: '医生复核中',
+    EMERGENCY_ESCALATED: '急诊人工升级',
+    CLINICIAN_CONFIRMED: '医生已确认',
+    CLINICIAN_MODIFIED: '医生已调整',
+    REJECTED: '医生已退回',
+    SYSTEM_FALLBACK: '人工流程接管',
+  }[status] || '复核状态待同步'
+}
+
+function reviewStatusType(status) {
+  return {
+    PENDING_REVIEW: 'warning',
+    IN_REVIEW: 'warning',
+    EMERGENCY_ESCALATED: 'danger',
+    CLINICIAN_CONFIRMED: 'success',
+    CLINICIAN_MODIFIED: 'success',
+    REJECTED: 'info',
+    SYSTEM_FALLBACK: 'info',
+  }[status] || 'info'
+}
+
 function clearFilters() {
+  const reset = emptyRecordFilters()
   activeTab.value = 'all'
-  searchText.value = ''
-  riskFilter.value = ''
+  recordId.value = reset.recordId
+  sessionId.value = reset.sessionId
+  symptoms.value = reset.symptoms
+  department.value = reset.department
+  keyword.value = reset.keyword
+  dateRange.value = reset.dateRange
+  page.value = reset.page
+  fetchRecords()
+}
+
+function applyFilters() {
+  page.value = 0
+  fetchRecords()
+}
+
+function chooseTab(value) {
+  activeTab.value = value
+  dateRange.value = value === 'all' ? [] : presetDateRange(value === '7d' ? 7 : 30)
+  page.value = 0
+  fetchRecords()
+}
+
+function changePage(nextPage) {
+  page.value = nextPage - 1
+  fetchRecords()
 }
 
 function viewDetail(id) {
@@ -157,37 +201,42 @@ onMounted(fetchRecords)
           role="tab"
           :aria-selected="activeTab === tab.value"
           :class="['records-tab', { 'records-tab-active': activeTab === tab.value }]"
-          @click="activeTab = tab.value"
+          @click="chooseTab(tab.value)"
         >
           {{ tab.label }}
-          <span>{{ tab.count }}</span>
         </button>
       </div>
 
       <div class="records-controls">
         <el-input
-          v-model="searchText"
-          class="records-search"
+          v-model="recordId"
+          class="records-id-input"
           clearable
-          placeholder="搜索症状、科室或会话编号"
-          aria-label="搜索问诊记录"
+          placeholder="记录 ID"
+          aria-label="按记录 ID 筛选"
+          @keyup.enter="applyFilters"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-
-        <el-select
-          v-model="riskFilter"
-          class="records-risk-select"
-          clearable
-          placeholder="风险等级"
-          aria-label="按风险等级筛选"
-        >
-          <el-option label="高风险" value="高" />
-          <el-option label="中风险" value="中" />
-          <el-option label="低风险" value="低" />
-        </el-select>
+        <el-input v-model="sessionId" class="records-session-input" clearable placeholder="会话 ID" aria-label="按会话 ID 筛选" @keyup.enter="applyFilters" />
+        <el-input v-model="symptoms" class="records-field-input" clearable placeholder="症状" aria-label="按症状筛选" @keyup.enter="applyFilters" />
+        <el-input v-model="department" class="records-field-input" clearable placeholder="科室" aria-label="按科室筛选" @keyup.enter="applyFilters" />
+        <el-input v-model="keyword" class="records-search" clearable placeholder="关键词（ID/会话/症状/科室）" aria-label="按关键词筛选" @keyup.enter="applyFilters" />
+        <el-date-picker
+          v-model="dateRange"
+          class="records-date-range"
+          type="datetimerange"
+          value-format="x"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          aria-label="按起止时间筛选"
+          @change="applyFilters"
+        />
+        <el-button type="primary" @click="applyFilters">应用</el-button>
+        <el-button v-if="hasActiveFilters" plain @click="clearFilters">重置</el-button>
       </div>
     </section>
 
@@ -210,7 +259,7 @@ onMounted(fetchRecords)
       </div>
     </section>
 
-    <section v-else-if="!loadError && !filteredRecords.length" class="records-empty">
+    <section v-else-if="!loadError && !records.length" class="records-empty">
       <el-empty :description="hasActiveFilters ? '没有符合筛选条件的记录' : '暂无问诊记录'">
         <el-button v-if="hasActiveFilters" type="primary" plain @click="clearFilters">
           清除筛选
@@ -223,7 +272,7 @@ onMounted(fetchRecords)
       <div class="records-list-header">
         <div>
           <strong>问诊时间线</strong>
-          <span>共 {{ filteredRecords.length }} 条记录</span>
+        <span>共 {{ total }} 条记录 · 第 {{ pages ? page + 1 : 0 }} / {{ pages }} 页</span>
         </div>
         <el-button v-if="hasActiveFilters" text type="primary" @click="clearFilters">
           清除筛选
@@ -232,7 +281,7 @@ onMounted(fetchRecords)
 
       <div class="records-timeline">
         <article
-          v-for="record in filteredRecords"
+          v-for="record in records"
           :key="record.id ?? record.sessionId"
           class="records-item"
           role="button"
@@ -258,9 +307,14 @@ onMounted(fetchRecords)
                 <span class="records-item-kicker">问诊症状</span>
                 <h2>{{ normalizeText(record.symptoms) || '症状信息未提供' }}</h2>
               </div>
-              <el-tag :type="normalizeText(record.riskLevel) ? 'success' : 'info'" effect="light" round>
-                {{ normalizeText(record.riskLevel) ? '分诊结果摘要' : '结果字段未提供' }}
-              </el-tag>
+              <div class="records-item-tags">
+                <el-tag :type="reviewStatusType(record.reviewStatus)" effect="plain">
+                  {{ reviewStatusLabel(record.reviewStatus) }}
+                </el-tag>
+                <el-tag :type="normalizeText(record.riskLevel) ? 'success' : 'info'" effect="light">
+                  {{ normalizeText(record.riskLevel) ? 'AI 分诊草案' : '结果字段未提供' }}
+                </el-tag>
+              </div>
             </div>
 
             <div class="records-meta">
@@ -312,6 +366,19 @@ onMounted(fetchRecords)
           </div>
         </article>
       </div>
+      <div class="records-pagination">
+        <el-pagination
+          v-if="total"
+          background
+          layout="prev, pager, next, sizes"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50]"
+          :current-page="page + 1"
+          :total="total"
+          @current-change="changePage"
+          @size-change="(nextSize) => { pageSize = nextSize; page = 0; fetchRecords() }"
+        />
+      </div>
     </section>
 
     <p class="records-data-note">
@@ -360,6 +427,7 @@ onMounted(fetchRecords)
 }
 
 .records-header-actions,
+.records-item-tags,
 .records-controls,
 .records-list-header > div,
 .records-item-footer,
@@ -374,11 +442,18 @@ onMounted(fetchRecords)
   flex: 0 0 auto;
 }
 
+.records-item-tags {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .records-toolbar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 20px;
+  gap: 12px;
   padding: 13px 14px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -430,18 +505,31 @@ onMounted(fetchRecords)
 }
 
 .records-controls {
-  justify-content: flex-end;
+  justify-content: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
   flex: 1;
 }
 
 .records-search {
-  width: min(100%, 300px);
+  width: min(100%, 260px);
 }
 
-.records-risk-select {
-  width: 126px;
+.records-id-input {
+  width: 118px;
+}
+
+.records-session-input {
+  width: 210px;
+}
+
+.records-field-input {
+  width: 142px;
+}
+
+.records-date-range {
+  width: 350px;
   flex: 0 0 auto;
 }
 
@@ -502,6 +590,13 @@ onMounted(fetchRecords)
 
 .records-timeline {
   position: relative;
+}
+
+.records-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .records-item {
@@ -685,7 +780,9 @@ onMounted(fetchRecords)
     justify-content: flex-start;
   }
 
-  .records-search {
+  .records-search,
+  .records-session-input,
+  .records-date-range {
     width: min(100%, 420px);
   }
 }
@@ -712,8 +809,16 @@ onMounted(fetchRecords)
   }
 
   .records-search,
-  .records-risk-select {
+  .records-id-input,
+  .records-session-input,
+  .records-field-input,
+  .records-date-range {
     width: 100%;
+  }
+
+  .records-pagination {
+    overflow-x: auto;
+    justify-content: flex-start;
   }
 
   .records-meta {

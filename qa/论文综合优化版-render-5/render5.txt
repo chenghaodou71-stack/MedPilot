@@ -1,0 +1,2813 @@
+                 
+
+JIANGSU NORMAL UNIVERSITY KEWEN COLLEGE
+
+     
+
+   
+
+     
+
+     
+
+     
+
+     2023 
+
+     7230264110
+
+     
+
+  
+                        
+
+    
+
+
+
+
+
+    2026  5  12
+
+                                             
+
+                     
+
+    "
+ " 
+
+ 
+
+
+
+
+
+                  
+2026  5  12   2026  5  12 
+                                             
+
+
+                      
+
+                                  
+
+     
+
+
+
+ MedPilot
+
+         Vue 3  Spring Boot  FastAPI        AI   
+LangGraph 
+ Ollama 
+ bge-m3FAISS 
+
+
+
+     
+Trace 
+
+
+
+
+          
+
+                                                           I
+                                             
+
+   Design and Implementation of a Multi-Specialty
+Healthcare Consultation and Auxiliary Triage System
+
+    Based on Multi-Agent Collaboration and Large
+                       Language Models
+
+                                 Abstract
+
+     Natural-language interaction has become an important entry point for digital
+health services as Internet healthcare, medical knowledge bases, and large language
+models continue to develop. Healthcare consultation combines symptom description,
+risk identification, specialty knowledge, and service coordination. A single generative
+model is therefore unsuitable for handling information organization, safety decisions,
+evidence retrieval, and result presentation as one undifferentiated task. This thesis
+designs and implements MedPilot, a multi-specialty healthcare consultation and
+assisted triage system based on multi-agent collaboration and large language models.
+
+     MedPilot uses Vue 3, Spring Boot, and FastAPI in a layered architecture. Its AI
+service coordinates danger-signal screening, symptom extraction, information-
+sufficiency assessment, active follow-up questioning, medical knowledge retrieval,
+department analysis, and answer composition through a conditional LangGraph
+workflow. Ordinary consultations use a locally deployed language model together
+with bge-m3 embeddings, FAISS retrieval, and lexical matching. High-risk scenarios
+enter a rule-driven warning path first, while each consultation result retains the risk
+level, recommended care timing, and evidence sources.
+
+     The system also provides consultation records, consent-scoped health profiles,
+follow-up tasks, physician review, medical knowledge approval and index-version
+management, trace monitoring, audit logging, and role-based access control.
+Streaming events expose processing stages to the front end, while the business service
+performs identity validation, persistence, and exception handling. These components
+form an integrated implementation from user consultation and result presentation to
+
+                                                          II
+                                             
+
+review governance and operational traceability.
+Key Words: Multi-Agent Collaboration;Large Language Models;Retrieval-
+
+              Augmented Generation;Healthcare Consultation;Auxiliary Triage
+
+                                                          III
+                                             
+
+                                  
+
+ ............................................................................................................................ I
+Abstract...................................................................................................................... II
+............................................................................................................................ V
+........................................................................................................................ VII
+1 ............................................................................................................................ 1
+1.1 ..................................................................................................... 1
+1.2 ..................................................................................................... 2
+1.3 ................................................................................................................. 3
+1.4 ................................................................................................................. 3
+2 ............................................................................................................................ 4
+2.1 ............................................................................................................. 4
+2.2 ................................................................................................................. 5
+2.3 ............................................................................................. 5
+2.4 ................................................................................................................. 6
+3 .................................................................................................................... 7
+3.1 ................................................................................. 7
+3.2 ....................................................................................... 23
+3.3 ............................................................................................................... 30
+4 .............................................................................................. 31
+4.1 ................................................................................... 31
+4.2 ............................................................................................... 33
+4.3 ................................................................................... 43
+4.4  RAG ....................................................................................... 46
+4.5 ........................................................................................... 48
+
+                                                          IV
+                                             
+
+4.6 ............................................................................... 51
+4.7 ............................................................................................... 55
+4.8 ............................................................................................................... 57
+5 ...................................................................................................... 58
+5.1 ........................................................................................... 58
+5.2 ....................................................................................... 59
+5.3 ............................................................................................... 61
+5.4 ................................................................................... 63
+5.5 ................................................................................... 64
+5.6 ............................................................................... 65
+5.7 ....................................................................................................... 66
+5.8 ............................................................................................................... 66
+6 .............................................................................................................. 68
+6.1 ....................................................................................................................... 68
+6.2 ....................................................................................................................... 69
+...................................................................................................................... 70
+.............................................................................................................................. 73
+
+                                                          V
+       
+
+              
+
+                               
+ 3-1                            12
+ 3-2                            13
+ 3-3                            14
+ 3-4                            15
+ 3-5                   E-R      16
+ 3-6                            17
+ 3-7                            19
+ 3-8              User          20
+ 3-9             Patient        21
+ 3-10    ConsultationSession    23
+ 3-11    ConsultationRecord     23
+ 3-12   ConsultationMessage     24
+ 3-13     ConsultationTrace     25
+ 3-14        HealthProfile      26
+ 3-15       FollowUpTask        27
+ 3-16   KnowledgeDocument       29
+ 4-1        ClinicalReview      40
+ 4-2                            43
+ 4-3                            46
+ 4-4                            48
+ 4-5                            50
+ 4-6                            53
+ 4-7                            55
+ 4-8                            58
+                
+
+       VI
+       
+
+            
+ 4-9
+ 4-10       61
+ 4-11
+ 4-12       61
+ 5-1
+ 5-2        62
+ 5-3
+            65
+
+            70
+
+            71
+
+            72
+
+       VII
+       
+
+              
+
+                                 
+ 3-1               users          30
+ 3-2              patients        31
+ 3-3     consultation_sessions    32
+ 3-4      consultation_records    32
+ 3-5     consultation_messages    33
+ 3-6       consultation_traces    34
+ 3-7         health_profiles      34
+ 3-8        follow_up_tasks       35
+ 3-9     knowledge_documents      35
+ 3-10        clinical_reviews     36
+ 5-1                              66
+ 5-2                              68
+ 5-3                              68
+ 5-4                               0
+       
+
+         VIII
+                                             
+
+1 
+
+       MedPilot 
+
+
+
+
+1.1 
+1.1.1 
+
+      
+
+
+
+
+      
+
+
+
+
+                                                           1
+        
+
+1.1.2 
+
+
+
+
+
+
+      
+
+Trace 
+
+
+
+[1]
+
+1.2 
+1.2.1 
+
+      2024 Hager  2400  4 
+
+[2]Tam
+
+
+
+ 5 [3]
+      2025 Chen  302 
+
+ 4  1 
+
+        2
+                                             
+
+[4]Gaber  2000  MIMIC 
+[5]
+
+      2026 Kang  6624 
+ 680        75.4%                   
+84.7% 5.9% [6]Flanders 
+29766  8 GPT-4o  1490 
+
+[7]
+
+
+1.2.2 
+
+       2024--2026 
+2024 
+[8]2025 
+
+[9]
+
+                                                           3
+                                             
+
+      2025 
+[10] 2026 
+ [11]
+[12] GraphRAG 
+[13]
+
+      
+MedPilot 
+
+
+1.3 
+
+      
+ LangGraph
+FastAPIOllamaFAISS  NDJSON 
+Flyway 
+
+"
+
+                                                           4
+                                             
+
+----------
+"
+Macro-F1Recall@3MRR
+
+
+      
+
+
+
+       
+
+
+
+      
+
+
+
+1.4 
+
+                                                           5
+                                             
+
+       2024--2026 
+
+ MedPilot 
+
+2 
+
+      
+
+
+2.1 
+2.1.1 
+
+       Vue 3Spring BootFastAPIMySQLOllama  FAISS 
+Spring Boot 
+FastAPI 
+ REST  NDJSON 
+
+
+2.1.2 
+
+                                                           6
+                                             
+
+      
+
+
+
+
+2.1.3 
+
+      
+
+
+
+
+2.1.4 
+
+      
+
+
+
+
+2.2 
+2.2.1 
+
+                                                           7
+                                             
+
+      
+
+
+
+
+2.2.2 
+
+      
+
+Trace 
+
+
+
+2.2.3 
+
+       
+
+
+
+
+2.2.4 
+
+                                                           8
+                                             
+
+      Cookie  CSRF 
+
+
+
+
+2.3 
+2.3.1 LangGraph 
+
+      LangGraph "
+"
+
+
+
+
+[10]
+
+2.3.2 FastAPI  Pydantic 
+
+                                                           9
+                                             
+
+      FastAPI  AI Pydantic 
+
+ Spring Boot
+
+2.3.3 Ollama 
+
+      Ollama 
+ bge-m3 
+
+
+2.3.4 FAISS 
+
+      FAISS 
+ S_dense S_lex
+ S = 0.8S_dense + 0.2S_lex  min(4KN)
+K=3N  S0.35 Top-3
+0.8/0.2 
+0.35  Top-3  Demo 
+
+
+
+                                                          10
+                                             
+
+[14]
+[15] RAG 
+[16]
+
+2.3.5 NDJSON  Trace
+
+      NDJSON  JSON  HTTP 
+Trace 
+
+
+
+2.4 
+
+       
+
+
+
+3 
+
+       
+ Flyway 
+
+
+                                                          11
+                                             
+
+3.1 
+3.1.1 
+
+      
+ 3-1 
+
+                                             3-1 
+
+       3-1 
+
+
+
+
+3.1.2 
+
+      
+ 3-2 
+
+                                                          12
+                                             
+
+                                             3-2 
+
+      
+ Trace 
+
+
+      
+ 3-3 
+
+                                                          13
+                                             
+
+                                               3-3 
+
+      
+
+
+
+3.1.3 E-R 
+
+      
+ 3-4 
+
+                                                          14
+                                             
+
+                                                    3-4 E-R 
+
+      
+
+
+
+
+3.1.4 
+
+      
+ 3-5 
+
+                                                          15
+                                             
+
+                                                3-5 
+
+      
+
+
+
+      
+3-6 
+
+                                                          16
+                                             
+
+                                               3-6 
+
+      
+
+ Trace
+
+3.1.5 
+
+       10 
+ IntelliJ IDEA  Java 
+
+
+                                                          17
+                                             
+
+      User  3-7 
+ IDEA  users 
+
+
+                                                          18
+
+
+        3-7 User 
+                   19
+                                             
+
+      Patient  3-8  IDEA
+ patients 
+
+
+                                              3-8 Patient 
+
+      ConsultationSession  3-9 
+ IDEA 
+consultation_sessions 
+
+                                                          20
+                                             
+
+                                     3-9 ConsultationSession 
+
+      ConsultationRecord 
+ 3-10  IDEA 
+ consultation_records 
+
+                                                          21
+
+
+                   22
+                                             
+
+                                     3-10 ConsultationRecord 
+
+      ConsultationMessage  3-11
+ IDEA 
+ consultation_messages 
+
+                                    3-11 ConsultationMessage 
+
+      ConsultationTrace  3-12
+ IDEA 
+ consultation_traces 
+
+                                                          23
+                                             
+
+                                      3-12 ConsultationTrace 
+
+      HealthProfile  3-13 
+  IDEA                         
+health_profiles 
+
+                                                          24
+                                             
+
+                                         3-13 HealthProfile 
+
+      FollowUpTask  3-14 
+   IDEA                         
+follow_up_tasks 
+
+                                                          25
+                                             
+
+                                        3-14 FollowUpTask 
+
+      KnowledgeDocument  3-
+15  IDEA 
+ knowledge_documents 
+
+                                                          26
+    
+
+ 3-15 KnowledgeDocument 
+                       27
+                                             
+
+      ClinicalReview  3-16 
+ IDEA 
+clinical_reviews 
+
+                                                          28
+                                             
+
+                                       3-16 ClinicalReview 
+
+3.2 
+
+       MySQL Flyway 
+
+
+                                                          29
+                                             
+
+ 10 --
+
+
+
+""
+
+
+
+
+      users 
+
+ active 
+
+ 3-1 
+
+                                  3-1 users 
+
+                                                         
+id                   BIGINT NOT                 
+username              VARCHAR    --             
+password_hash         VARCHAR                   
+role                  VARCHAR    64             
+active             BOOLEAN NOT                  
+created_at           TIMESTAMP   255            
+token_version        BIGINT NOT                 token 
+identity_provider     VARCHAR    16             identityprovider
+external_subject      VARCHAR                   externalsubject
+employee_number       VARCHAR    --             
+organization_code     VARCHAR                   
+campus_code           VARCHAR    6              
+department_code       VARCHAR                   
+                                 --    0
+
+                                 16   'LOCAL'
+
+                                 255  
+
+                                 64   
+
+                                 64   
+
+                                 64   
+
+                                 64   
+
+                                      30
+                                
+
+                                                       
+
+patient_mpi_id         VARCHAR       128               
+
+mfa_assurance_level    INT NOT       --    0           mfaassurancelevel
+
+last_authenticated_at  TIMESTAMP     6                 lastauthenticated 
+
+account_expires_at     TIMESTAMP     6                 accountexpires 
+
+local_password_enable  BOOLEAN NOT   --    TRUE        localpasswordenabled
+d
+
+patients 
+
+
+
+ 3-2 
+
+                                      3-2 patients 
+
+                                                                
+id                       BIGINT NOT                    
+mpi_id                    VARCHAR    --                
+organization_code         VARCHAR                      
+source_system             VARCHAR    128               
+active                 BOOLEAN NOT                     
+source_updated_at        TIMESTAMP   64                 updated 
+created_at               TIMESTAMP                     
+updated_at               TIMESTAMP   64                
+
+                                     --    TRUE
+
+                                     6    
+
+                                     6    
+
+                                     6    
+
+consultation_sessions 
+
+
+
+ 3-3 
+
+                                          31
+                  
+
+                   3-3 consultation_sessions 
+
+                                                     
+id
+session_id      BIGINT NOT   --                      
+user_id
+created_at      VARCHAR      36                      
+last_active_at
+                BIGINT NOT   --                      
+
+                TIMESTAMP    6                       
+
+                TIMESTAMP    6                       lastactive 
+
+consultation_records 
+
+
+
+ 3-4 
+
+                          3-4 consultation_records 
+
+                                                              
+id                                                   
+user_id         BIGINT NOT   --                      
+session_id                                           
+trace_id        BIGINT NOT   --                      
+
+symptoms        VARCHAR      64                      
+
+department      VARCHAR      36                      
+risk_level                                           
+confidence      LONGTEXT     --                      
+support_score       NULL                             
+abstained                                            
+urgency         VARCHAR      64                      
+matched_rule                                         
+                VARCHAR      16   
+triage_factors                                       
+                DOUBLE NULL  --   
+explanation                                          
+                DOUBLE NULL  --   
+
+                BOOLEAN NOT  --    FALSE
+
+                TEXT NULL    --   
+
+                VARCHAR      128  
+
+                LONGTEXT     --   
+                    NULL
+
+                LONGTEXT     --   
+                    NULL
+
+                                  32
+                         
+
+                                                      
+answer
+                       LONGTEXT      --               
+citations                  NULL
+
+conversation_history   LONGTEXT      --               
+created_at                 NULL
+patient_mpi_id
+encounter_number       LONGTEXT      --               
+organization_code          NULL
+campus_code
+encounter_department_  TIMESTAMP     6                
+code
+                       VARCHAR       128              
+
+                       VARCHAR       128              
+
+                       VARCHAR       64               
+
+                       VARCHAR       64               
+
+                       VARCHAR       64               encounterdepartment
+                                                      
+
+consultation_messages 
+
+ consultation_sessions
+
+ 3-5 
+
+                          3-5 consultation_messages 
+
+                                                               
+id                                                    
+session_id             BIGINT NOT    --               
+user_id                                               
+role                   VARCHAR       36               
+content                                               
+trace_id               BIGINT NOT    --               
+created_at                                            
+                       VARCHAR       16   
+
+                       LONGTEXT NOT  --   
+
+                       VARCHAR       36   
+
+                       TIMESTAMP     6    
+
+                                          33
+                                     
+
+consultation_traces 
+
+
+
+ 3-6 
+
+                                3-6 consultation_traces 
+
+                                                                   
+id                                                        
+trace_id           BIGINT NOT    --                       
+session_id                                                
+user_id            VARCHAR       36                       
+events_json                                               
+citations_json     VARCHAR       36                       
+terminal_phase                                            
+followup_pending   BIGINT NOT    --                       
+failure_code                                              
+total_duration_ms  LONGTEXT NOT  --                       
+created_at                                                
+                   LONGTEXT NOT  --  
+
+                   VARCHAR       32  
+
+                   BOOLEAN NOT   --  
+
+                   VARCHAR       64  
+
+                   BIGINT NOT    --   0
+
+                   TIMESTAMP     6   
+
+health_profiles 
+
+
+
+ 3-7 
+
+                                  3-7 health_profiles 
+
+                                                                   
+id                                                        
+user_id            BIGINT NOT    --                       
+profile_json                                              
+consent_granted    BIGINT NOT    --                       
+
+                   LONGTEXT NOT  --  
+
+                   BOOLEAN NOT   --   FALSE
+
+                                     34
+               
+
+                                                 
+updated_at
+             TIMESTAMP     6                     
+
+follow_up_tasks 
+
+
+
+ 3-8 
+
+                           3-8 follow_up_tasks 
+
+                                                          
+id                                               
+user_id      BIGINT NOT    --                    
+record_id                                        
+title        BIGINT NOT    --                    
+
+notes        BIGINT NULL   --                    
+
+due_at       LONGTEXT NOT  --                    
+status                                           
+created_at   LONGTEXT      --                    
+                 NULL
+
+             TIMESTAMP     6    
+
+             VARCHAR       16   
+
+             TIMESTAMP     6    
+
+knowledge_documents 
+
+
+
+ 3-9 
+
+                3-9 knowledge_documents 
+
+                                                          
+doc_id                                           
+title        VARCHAR       128                   
+department                                       
+source_type  VARCHAR       512                   
+
+             VARCHAR       32   
+
+             VARCHAR       64   
+
+                                35
+                                 
+
+                                                                          
+institution
+url                     VARCHAR     256                                 
+published_date
+source_version          VARCHAR     2048                                
+license_name
+original_filename       VARCHAR     10                                  
+media_type
+size_bytes              VARCHAR     256                                 
+checksum
+parsing_status          VARCHAR     512                                 
+vector_status
+review_status           VARCHAR     512                                 
+chunk_count
+processing_error        VARCHAR     128                                 
+reviewer
+reviewed_at             BIGINT NOT  --    0                             
+created_at
+updated_at              VARCHAR     64                                  
+
+                        VARCHAR     32                                  
+
+                        VARCHAR     32                                  
+
+                        VARCHAR     16                                  
+
+                        INT NOT     --    0                             
+
+                        TEXT NULL   --                                  processingerror
+
+                        VARCHAR     128                                 
+
+                        TIMESTAMP   6                                   
+
+                        TIMESTAMP   6                                   
+
+                        TIMESTAMP   6                                   
+
+clinical_reviews 
+
+ AI 
+
+ 3-10 
+
+                                     3-10 clinical_reviews 
+
+                                                                                 
+id                                                                      
+review_id               BIGINT NOT  --                                  
+
+consultation_record_id  VARCHAR     36                                  
+
+                        BIGINT NOT             
+                                    --
+
+                                               consultation_records.id
+
+                                         36
+                         
+
+                                                          
+
+patient_mpi_id         VARCHAR      128        
+
+organization_code      VARCHAR      64         
+
+campus_code            VARCHAR      64         
+
+encounter_department_  VARCHAR      64         encounterdepartment
+code                                           
+
+ai_trace_id            VARCHAR      36         aitraceid
+
+original_department    VARCHAR      128         department
+
+original_risk_level    VARCHAR      32          risklevel
+
+original_urgency       TEXT NULL    --          urgency
+
+status                 VARCHAR      32         
+
+decision               VARCHAR      16         
+
+claimed_by_user_id     BIGINT NULL  --         
+
+reviewer_user_id       BIGINT NULL  --         
+
+reviewer_employee_nu   VARCHAR      64         reviewer 
+mber
+
+claimed_at             TIMESTAMP    6          claimed 
+
+final_department       VARCHAR      128         department
+
+final_risk_level       VARCHAR      32          risklevel
+
+final_urgency          TEXT NULL    --          urgency
+
+decision_reason        LONGTEXT     --         
+                           NULL
+
+decided_at             TIMESTAMP    6          
+
+emergency_escalated_   TIMESTAMP    6          emergencyescalated
+at                                             
+
+created_at             TIMESTAMP    6          
+
+updated_at             TIMESTAMP    6          
+
+version                BIGINT NOT   --    0    
+
+3.3 
+
+                                         37
+                                             
+
+      
+
+E-R 10  10 
+
+IntelliJ IDEA  Java  Flyway 
+
+--
+
+4 
+
+4.1 
+
+1
+
+4.1.1 
+
+     `AuthController`
+ BCrypt 
+JWTJWT  HttpOnly Cookie 
+AI `/api/auth/me`
+Cookie 
+
+     `JwtAuthFilter` JWT
+ Spring Security 
+
+
+
+4.1.2 CSRF 
+
+      Cookie  JWT
+ `CookieCsrfTokenRepository`   CSRF      Cookie    Strict
+SameSiteAI  Spring Boot 
+FastAPI 
+
+4.1.3 
+
+                                                          38
+                                             
+
+     `SecurityConfig`     HTTP                
+DOCTOR  REVIEWER  ADMIN 
+KNOWLEDGE_EDITOR                     
+ADMIN  REVIEWER  DOCTOR               
+ADMIN ADMINAUDITOR 
+
+     
+                ADMIN  KNOWLEDGE_EDITOR 
+REVIEWER  DOCTOR REVIEWER  DOCTOR
+ ADMIN  AUDITOR
+
+
+      4-1 
+
+
+2
+
+                                    4-1 
+
+                                  .requestMatchers(HttpMethod.POST,
+                                              "/api/knowledge/ingest",
+                                              "/api/knowledge/upload",
+                                              "/api/knowledge/versions/build")
+                                              .hasAnyRole("ADMIN", "KNOWLEDGE_EDITOR")
+
+                                  .requestMatchers(HttpMethod.DELETE, "/api/knowledge/**")
+                                              .hasAnyRole("ADMIN", "KNOWLEDGE_EDITOR")
+
+                                  .requestMatchers(HttpMethod.GET, "/api/knowledge/**")
+                                              .hasAnyRole("ADMIN", "KNOWLEDGE_EDITOR",
+
+          "REVIEWER", "DOCTOR", "AUDITOR")
+                                              .hasAnyRole("ADMIN", "AUDITOR")
+
+                                  .requestMatchers("/api/audit/**")
+                                              .hasAnyRole("ADMIN", "AUDITOR")
+
+                                  .requestMatchers("/api/knowledge/**", "/api/monitor/**",
+          "/api/dashboard/**")
+
+                                              .hasRole("ADMIN")
+                                  .anyRequest().authenticated()
+
+                                                          39
+   
+
+3
+
+      HTTP 
+ 4-1 
+
+                                            4-1 
+
+      4-1 
+
+
+
+4.1.4 
+
+     `DataEncryptionService` AES-256-GCM 
+ 32  12  Nonce
+128 `enc:v1`
+ Nonce
+
+     `id=base64`
+
+JPA 
+
+
+4.2 
+
+                                                          40
+   
+
+1
+
+4.2.1 
+
+      AI  run_consult_stream 
+ DANGER_SIGN_TERMS  _ALIASES 
+
+
+match_danger_signs 
+"
+"""
+
+
+     "
+""
+"""
+ `SafetyScreenResult`
+
+     `classify`""
+`TriageResult` done 
+
+
+
+
+     
+ 4-2 
+
+   41
+   
+
+2
+
+                                    4-2 
+
+          def match_danger_signs(text: str) -> tuple[str, ...]:
+                """Return canonical danger signs that are asserted, not explicitly negated."""
+                asserted: set[str] = set()
+                for clause in _CLAUSE_BOUNDARY.split(text):
+                      previous_end = 0
+                      previous_negated = False
+                      for start, end, canonical in _clause_matches(clause):
+                            prefix = clause[:start]
+                            connector = clause[previous_end:start]
+                            directly_negated = _TARGETED_NEGATION.search(prefix) is not
+
+          None
+                            inherited_negation = (
+                                  previous_negated
+                                  and _COORDINATING_TEXT.fullmatch(connector) is not None
+                            )
+                            negated = directly_negated or inherited_negation
+                            if not negated:
+                                  asserted.add(canonical)
+
+3
+
+     
+ 4-2 
+
+   42
+                                             
+
+                                          4-2 
+
+      4-2 
+
+
+4.2.2 
+
+      extract 
+ JSON _parse_llm_json  JSON 
+
+
+[16][17]
+ [18]
+
+
+
+      `normalize_symptoms` 
+
+
+
+
+
+4.2.3 
+
+     `is_sufficient` red_flags
+
+`build_followup`
+
+                                                          43
+                                             
+
+     
+
+`FollowUpQuestion`
+ missing  missing 
+
+
+      4-3 
+
+
+                                                          44
+                                  
+
+                       4-3 
+
+def is_sufficient(s: StructuredSymptoms) -> bool:
+
+   """"""
+
+      if s.red_flags:
+            return True
+
+      n = len(s.symptoms)
+      if n >= 2:
+
+            return True
+      if n == 1 and (s.duration or s.severity):
+
+            return True
+      return False
+def build_followup(s: StructuredSymptoms) -> FollowUpQuestion:
+
+   """"""
+
+      if not s.symptoms:
+            return FollowUpQuestion(
+
+         question="",
+
+                  missing=("symptoms",),
+            )
+      missing: list[str] = []
+      if len(s.symptoms) < 2:
+            missing.append("more_symptoms")
+
+if "duration" in missing:
+
+  question = f"
+                           {s.symptoms[0]}  "
+
+elif "more_symptoms" in missing:
+
+   question = f"{s.symptoms[0]}"
+
+else:
+
+   question = f"{s.symptoms[0]}"
+
+return FollowUpQuestion(question=question, missing=tuple(missing))
+
+ 4-3 
+
+                           45
+                                             
+
+                                            4-3 
+
+      4-3 
+
+
+4.2.4 
+
+     _retrieve_node 
+ expand_query_with_aliases  bge-m3 
+ FAISS  Top-3 
+ S_dense  S_lex S=0.8S_dense+0.2S_lex  0.35 
+ 3 0.8 
+0.2  K  2.3.4
+
+[16]
+
+
+      `MEDPILOT_RAG_MIN_SCORE` 
+ Top-K `RankedEvidence`
+
+
+     `classify`
+
+/
+abstained 
+
+
+     
+
+                                                          46
+                                             
+
+ 4-4 
+
+                                      4-4 
+
+                k = min(max(top_k * 4, top_k), len(chunks))
+                scores, ids = index.search(vec, k)
+
+                candidates: list[tuple[float, float, int]] = []
+                for score, idx in zip(scores[0], ids[0]):
+
+                      if idx < 0:
+                            continue
+
+                      dense_score = float(score)
+                      lexical_score = _lexical_overlap(retrieval_query, chunks[idx].text)
+                      combined_score = 0.8 * dense_score + 0.2 * lexical_score
+                      if combined_score < min_score:
+
+                            continue
+                      candidates.append((combined_score, dense_score, int(idx)))
+
+                results: list[RankedEvidence] = []
+                for combined_score, _dense_score, idx in sorted(
+
+                      candidates, key=lambda item: (-item[0], item[2])
+                )[:top_k]:
+
+                      c = chunks[idx]
+                      results.append(RankedEvidence(
+
+                            citation_id=c.chunk_id,
+                            doc_id=c.doc_id,
+                            chunk_id=c.chunk_id,
+                            department=c.department,
+                            source=c.source,
+                            source_type=c.source_type,
+                            quote=c.text,
+                            score=round(float(combined_score), 4),
+                            index_version=index_version,
+                            institution=c.institution,
+                            title=c.title,
+
+      0.8  0.2 
+
+                                                          47
+                                             
+
+ Top-K  4-4 
+
+                                    4-4 
+
+      4-4 
+
+
+4.2.5 
+
+      compose 
+ _is_trusted_evidence HTTPS URL
+
+Almanac 
+[19]
+
+
+     `TriageResult``_render_answer`
+
+
+
+
+
+4.2.6 NDJSON 
+
+     AI `EventEmitter` Trace ID 
+  `safety_screen`    extractask_followup  retrieve classify 
+compose  answer_delta  done
+ error  inference_timeout 
+
+                                                          48
+                                             
+
+
+     `ConsultController` WebClient  AI  Reactor
+
+Flux `ConsultationEventAccumulator`
+`LiveTraceRegistry` done 
+
+INCOMPLETE_STREAM 
+
+      4-5 
+Trace
+
+
+                                4-5 NDJSON 
+
+                def emit(
+                      self,
+                      event_type: EventType | str,
+                      *,
+                      phase: ConsultPhase,
+                      status: str,
+                      node: str | None = None,
+                      label: str | None = None,
+                      data: dict | None = None,
+
+                ) -> dict:
+                      if event_type not in {"node", "answer_delta", "error", "done"}:
+                            raise ValueError(f"unsupported event type: {event_type}")
+                      if event_type == "answer_delta":
+                            if status != "streaming" or phase != "composing":
+                                  raise ValueError("answer_delta must be a composing stream event")
+                            data = AnswerDeltaData.model_validate(data or {}).model_dump()
+                      self._sequence += 1
+                      event = {
+                            "protocol_version": "1.0",
+                            "trace_id": self.trace_id,
+                            "session_id": self.session_id,
+                            "sequence": self._sequence,
+                            "type": event_type,
+
+     
+
+                                                          49
+                                             
+
+ 4-5 
+
+                                         4-5 
+
+      4-5 
+
+
+4.3 
+
+1
+
+4.3.1 
+
+      `SessionOwnershipService` 
+
+AI 
+
+
+4.3.2  Trace 
+
+     `ConsultationPersistenceService`  Trace
+
+
+
+
+     
+`ClinicalReview`AI 
+ AI 
+
+                                                          50
+                                             
+
+
+
+4.3.3 
+
+     `HealthProfileController` 
+
+
+
+
+      `FollowUpTask` 
+
+
+
+4.3.4 
+
+     `RecordDetailView.vue`
+ AI 
+AI 
+                          chunk_id 
+index_versionTrace ID 
+
+      reviewStatus 
+ AI 
+ AI 
+
+
+                                                          51
+   
+
+2
+
+               4-7 
+
+            ConsultationEventAccumulator.Snapshot snapshot) {
+      persist(userId, requestText, requestJson, snapshot, null);
+}
+
+@Transactional
+public void persist(
+
+            Long userId,
+            String requestText,
+            String requestJson,
+            ConsultationEventAccumulator.Snapshot snapshot,
+            PatientEncounterContext patientContext) {
+      if (traces.existsByTraceId(snapshot.traceId())) {
+            return;
+      }
+
+            traces.save(new ConsultationTrace(userId, snapshot));
+            if (messages != null && snapshot.answer() != null && !
+snapshot.answer().isBlank()) {
+
+                  messages.appendAssistant(
+                              userId, snapshot.sessionId(), snapshot.traceId(),
+
+snapshot.answer());
+            }
+            if (!snapshot.shouldCreateRecord()) {
+                  return;
+            }
+
+            ConsultationRecord record = new ConsultationRecord(userId,
+snapshot.sessionId());
+
+            record.setTraceId(snapshot.traceId());
+
+   52
+   
+
+3
+
+     
+ 4-6 
+
+                                   4-6 
+
+      4-6 
+
+
+4.4  RAG 
+
+1
+
+4.4.1 
+
+     
+
+
+                                                          53
+                                             
+
+ SHA-256 
+PDF  PDFBox 
+
+      AI  `sanitizeIngestPayload`
+
+ MySQL AI 
+
+      AI 
+ 4-6 
+
+2
+
+                                       4-6 
+
+                static Map<String, Object> sanitizeIngestPayload(Map<String, ?> body) {
+                      Map<String, Object> sanitized = new LinkedHashMap<>();
+                      if (body != null) sanitized.putAll(body);
+                      sanitized.remove("reviewer");
+                      sanitized.remove("reviewed_at");
+                      sanitized.remove("checksum");
+                      sanitized.put("review_status", "pending");
+                      Object text = sanitized.get("text");
+                      if (text != null) sanitized.put("checksum", sha256(text.toString()));
+                      return sanitized;
+
+     
+pending 
+
+4.4.2 
+
+      X-MedPilot-Reviewer 
+ AI 
+TRIPOD-LLM 
+ [20]
+
+
+     
+
+""""
+
+                                                          54
+   
+
+3
+
+     
+ 4-7 
+
+                                   4-7 
+
+      4-7 
+
+
+4.4.3 
+
+     `KnowledgeView.vue` 
+
+
+
+
+
+4.5 
+
+1
+
+4.5.1 
+
+     
+
+ IN_REVIEW 
+
+                                                          55
+        
+
+4.5.2 
+
+      CONFIRMMODIFYREJECT  ESCALATE 
+CONFIRM  AI MODIFY 
+REJECT ESCALATE 
+
+
+
+     `ClinicalReviewView.vue`
+ AI 
+ AI "
+AI "
+
+4.5.3 
+
+     
+
+
+
+[21]
+
+
+     
+
+
+
+
+        56
+   
+
+2
+
+                     4-8 
+
+                  : reviews.findByStatusOrderByCreatedAtDesc(status);
+      return candidates.stream()
+
+                  .filter(review -> readableReview(actor, review))
+                  .toList();
+}
+
+@Transactional(readOnly = true)
+public ClinicalReview get(User actor, String idOrReviewId) {
+
+      requireClinicalReviewer(actor);
+      ClinicalReview review = find(idOrReviewId);
+      requireReadable(actor, review);
+      return review;
+}
+
+@Transactional
+public ClinicalReview claim(User actor, String idOrReviewId) {
+
+      requireClinicalReviewer(actor);
+      ClinicalReview review = find(idOrReviewId);
+      ConsultationRecord record = requireReadable(actor, review);
+      rejectSelfReview(actor, record);
+      review.claim(actor, Instant.now());
+      return reviews.save(review);
+}
+
+@Transactional
+public ClinicalReview decide(
+
+            User actor,
+            String idOrReviewId,
+            ClinicalReviewDecision decision,
+            String finalDepartment,
+
+   57
+   
+
+3
+
+
+
+ 4-8 
+
+                                            4-8 
+
+       4-8 
+
+ AI 
+
+4.6 
+
+1
+
+4.6.1 Trace 
+
+     `MonitorView.vue`  Trace Trace
+ Trace
+
+
+
+     Trace 
+
+                                                          58
+                                             
+
+
+
+
+                                                          59
+2              
+
+     }   4-9  Trace 
+
+@Autowired
+public LiveTraceRegistry(ObjectMapper mapper, RedisRuntimeState sharedState) {
+
+      this.mapper = mapper;
+      this.sharedState = sharedState;
+}
+
+public synchronized Handle start(String sessionId, Long userId) {
+      Handle handle = new Handle(UUID.randomUUID().toString(), sessionId, userId);
+      MutableTrace trace = new MutableTrace(handle);
+      traces.put(handle.requestId(), trace);
+      trimRecent();
+      emit("started", trace);
+      persistShared(trace);
+      return handle;
+
+}
+
+public synchronized void publish(Handle handle, String traceId, String rawEvent) {
+      MutableTrace trace = require(handle);
+      if (!"active".equals(trace.status)) return;
+      trace.traceId = preferTraceId(trace.traceId, traceId);
+      trace.events.add(readEvent(rawEvent));
+      trace.updatedAt = Instant.now();
+      emit("event", trace);
+      persistShared(trace);
+
+}
+
+public synchronized void complete(Handle handle, String traceId) {
+      terminate(handle, traceId, "completed", null);
+
+}
+
+                                                    60
+   
+
+3
+
+      Trace 
+ 4-9 
+
+                                          4-9 
+       4-9  Trace 
+ 4-10 
+
+                                           4-10 
+                                                          61
+                                             
+
+       4-10 
+
+
+4.6.2 
+
+     `AuditLogInterceptor`  Web HTTP 
+
+
+
+
+     
+ 4-11 
+
+                                           4-11 
+       4-11  Trace 
+
+
+4.6.3 
+
+      AI HTTP 
+
+
+ Trace  AI  done
+ INCOMPLETE_STREAM 
+
+                                                          62
+                                             
+
+     ""
+ AI 
+LiveTraceRegistry  failed  cancelled 
+
+
+4.7 
+
+1
+
+4.7.1 
+
+     `ConsultView.vue`
+
+
+
+
+
+4.7.2 
+
+     
+ Trace
+
+
+
+4.7.3 
+
+     
+Trace ID 
+ AI 
+
+
+                                                          63
+                       
+
+2
+
+                     4-10  NDJSON 
+
+async function requestConsult(text) {
+   stage.value = 'processing'
+   workflowStep.value = 0
+   progress.value = 0
+   requestError.value = ''
+   requestErrorSource.value = null
+   feedbackSelection.value = ''
+   feedbackSubmitted.value = false
+   followupQuestion.value = ''
+   structuredSymptoms.value = null
+   evidenceList.value = []
+   triageData.value = null
+   answerText.value = ''
+   answerCitations.value = []
+   safetyBoundary.value = ''
+   resultCreatedAt.value = null
+
+const controller = new AbortController()
+
+abortController.value = controller
+
+            const requestFailure = new Error(payload?.error || `  $
+
+ {response.status} `)
+
+   requestFailure.status = response.status
+
+   throw requestFailure
+
+}
+
+if (!response.body) {
+
+ throw new Error('')
+
+}
+
+                                    64
+        
+
+3
+
+
+
+ 4-12 
+
+                                              4-12 
+
+       4-12 
+
+
+
+4.8 
+
+      MedPilot 
+
+ bge-m3  FAISS 
+ JWTCSRF
+
+Trace 
+ 5 
+
+
+                                                          65
+                                             
+
+5 
+
+5.1 
+
+5.1.1 
+
+     MedPilot AI 
+ Node.js  Java 17  Spring Boot
+AI  Python 3.11FastAPI  LangGraphMySQL 
+Ollama  qwen2.5:7b  bge-m3 FAISS 
+
+
+
+      5-1 
+
+         5-1 
+
+                                 
+             Vue 3ViteNode.jsElement Plus
+          Java 17Spring Boot 3.3.4JPASpring
+
+                               Security
+ AI 
+        Python 3.11FastAPILangGraphPydantic
+                        Ollama / qwen2.5:7b
+                          Ollama / bge-m3
+ 
+             FAISS IndexFlatIP
+                     MySQL 8Flyway 
+                               NDJSON
+
+        
+                                 
+
+5.1.2 
+
+     "----"
+
+
+ AI 
+
+task gold_route gold_department  gold_risk
+gold_red_flags acceptable_doc_ids 
+ gold_red_flags 
+
+                                                          66
+                                             
+
+
+P0
+ P4  benchmark_1000.py 
+ 20260831 TRIPOD-LLM 
+[22]TRIPOD-LLM 
+[23]
+
+     
+ 20260831 
+ bge-m3
+FAISS 
+
+
+5.1.3 
+
+     
+Recall_safe = TP_safe / (TP_safe + FN_safe)
+
+ [13] 
+
+
+      =  / 
+ =  / 
+
+              Precision  Recall  F1     
+Precision=TP/(TP+FP)  Recall=TP/(TP+FN)  F1=2×Precision×Recall/
+(Precision+Recall)Macro-F1=(1/C)F1_c C 
+ F1
+
+      F1
+   Recall@3=            /           
+MRR@3=(1/M)(1/r_i) r_i  i 
+ 0 Macro-F1
+/ Macro-F1
+
+ Demo 
+
+
+5.2 
+
+5.2.1 
+
+                                                          67
+                                      
+
+ 1000  5-2 
+
+            5-2 
+
+                                     
+                320     8  40 5
+                320      64 
+                200     4  80
+                160     5  64 
+                1000    10 5 
+                         40 
+                        5 
+                         32 
+                         20260831
+                        
+
+     
+ 40  P0  P4 
+
+
+
+
+
+5.2.2 
+
+     
+ 5-3 
+
+            5-3 
+
+                        
+  1           
+  2               JWT Cookie 
+  3        
+  4                     
+  5        
+  6                     
+                            
+
+                 
+                      
+
+                "
+                                             
+
+                   "
+
+                                             
+                ""
+
+                                                        
+
+                 
+                       
+
+                68
+     
+
+                      
+  7
+  8     
+  9
+                      
+ 10
+        /
+ 11
+ 12                   
+ 13
+ 14         done      
+ 15                            Trace
+
+       AI  done                  
+                      INCOMPLETE_STRE
+           
+                      AM 
+
+        
+
+                      
+
+        
+
+                      
+                                
+
+            Trace ID  
+                               
+
+                      
+
+                       CSV
+
+     
+
+ RAG AI 
+
+
+5.3 
+
+5.3.1 
+
+     320 P0  P3 
+256 P4  64 
+ 80.00% 680 
+ 100.00%
+ 5-1 
+
+       69
+                                             
+
+                                      5-1 
+
+      5-1 P0  P3 
+100%P4  0 P3  92.19% 96.88%
+ 100% 0 64
+6432  40 
+
+5.3.2 
+
+     
+160  100.00%
+
+qwen2.5:7b 
+
+     
+
+
+
+
+5.3.3 
+
+     320  100.00%
+Top-3  71.88%MRR@3  0.6255
+""""
+ 5-2
+
+
+                                                          70
+                                             
+
+                                       5-2 
+
+      5-2  320  200 
+ 95.94%Macro-F1  0.9585
+ 59.04%Macro-F1  0.5861200 
+ 0
+
+
+     HTTPS 
+
+
+
+
+5.4 
+5.4.1 
+
+      5-1 
+ 40  P0  P3  32 P4  8 
+ 0.8000 0.8000 80%
+ 8 
+
+     P4  64 """""
+"
+
+
+                                                          71
+                                             
+
+
+
+5.4.2 
+
+      160  840 
+F1  0.00000.7080  0.8889Macro-F1  0.5323 68.57%
+ F1  0  200 
+ 64  P4  5-3 
+ 5-3 
+
+                                 5-3 
+
+      5-3  256     P50  P95  0.014 ms 
+0.020 ms  64              P50  P95   690.715 ms 
+913.475 ms P50  686.198 ms  670.048 ms
+ P50  0.012 ms
+
+
+5.5 
+5.5.1 
+
+     Top-K 
+
+200 
+ 0.00%
+
+
+                                                          72
+                                             
+
+      active.json 
+
+ index_version
+
+
+5.5.2 
+
+     
+320  Recall@3 
+71.88% RAG 
+[24] Trace 
+ Top-3 
+
+
+     """"
+
+
+
+
+5.6 
+
+5.6.1 
+
+             USER  DOCTOR  KNOWLEDGE_EDITOR 
+REVIEWERADMIN  AUDITOR 
+
+
+
+
+
+     break-glass  DOCTOR 
+
+
+
+
+5.6.2 
+
+      JWT Cookie  HttpOnly CSRF  AI 
+ AES-256-GCM  32  12 
+Nonce  128 
+
+
+                                                          73
+        
+
+
+
+5.6.3 
+
+      AI 
+
+
+ Trace
+ AI 
+
+      Ollama
+ degraded 
+ LiveTraceRegistry  failedcancelled  completed 
+
+
+5.7 
+
+5.7.1 
+
+      320  Macro-F1  0.9585
+ F1  0.9877 F1  0.9189 200
+ Macro-F1  0.5861
+
+
+5.7.2 
+
+      Macro-F1  0.5323
+ F1  0.8889 P4 
+ F1  0.7080 F1 
+0
+
+
+5.7.3 
+
+     
+[25]
+[26]
+[27]
+[28]
+[29]RAG 
+[30]
+
+        74
+                                             
+
+     
+
+
+ Recall@3 
+
+
+      
+
+[31]
+
+[32] [33]
+
+ [34]
+
+
+
+[35]
+      
+
+1000  DANGER_SIGN_TERMS
+
+
+
+
+
+5-4             5-4 
+
+                                                       
+                     0.8000        1.0000  
+                                           
+
+                             75
+           
+
+                                 
+      
+-          0.7937       0.8941   /
+                                 
+
+           +0.0063      +0.1059   1000 
+
+ 5-4 
+
+ 10.59 
+
+""
+
+
+
+
+
+5.8 
+
+      1000 
+ 80.00% Macro-F1  0.9585
+ Macro-F1  0.5861 Macro-F1  0.5323Recall@3  71.88%
+ 100.00% 0.00% Demo 
+ P4 
+
+
+
+                    76
+    
+
+6 
+
+6.1 
+
+     "
+"
+MedPilot  Demo
+
+     
+
+Trace 
+
+
+
+     AI 
+AI  LangGraph 
+
+
+Trace AI 
+
+
+     
+
+
+
+bge-m3  FAISS 
+
+
+
+     
+Trace JWT
+CSRFAES-256-GCMAI 
+
+
+
+     
+
+ F1 
+
+                                                          77
+                                             
+
+ F1  Demo 
+
+6.2 
+
+     
+[36]
+[37]
+[38]
+
+
+     
+
+[39]
+[40]
+[41]
+[42]CiteSpace 
+[43]
+
+
+     
+Trace 
+[44]
+[45]
+
+[46]
+
+
+     
+
+
+Demo 
+
+                                                          78
+                                             
+
+                                 
+
+[1] QIU J, LAM K, LI G, et al. LLM-based agentic systems in medicine and healthcare[J].
+
+Nature Machine Intelligence, 2024, 6(12): 1418-1420. DOI:10.1038/s42256-024-00944-1.
+
+[2] HAGER P, JUNGMANN F, HOLLAND R, et al. Evaluation and mitigation of the limitations
+
+of large language models in clinical decision-making[J]. Nature Medicine, 2024, 30(9): 2613-
+2622. DOI:10.1038/s41591-024-03097-1.
+
+[3] TAM T Y C, SIVARAJKUMAR S, KAPOOR S, et al. A framework for human evaluation of
+
+large language models in healthcare derived from literature review[J]. npj Digital Medicine, 2024,
+7(1): 258. DOI:10.1038/s41746-024-01258-7.
+
+[4] CHEN X, YI H, YOU M, et al. Enhancing diagnostic capability with multi-agents
+
+conversational large language models[J]. npj Digital Medicine, 2025, 8(1): 159.
+DOI:10.1038/s41746-025-01550-0.
+
+[5] GABER F, SHAIK M, ALLEGA F, et al. Evaluating large language model workflows in
+
+clinical decision support for triage and referral and diagnosis[J]. npj Digital Medicine, 2025, 8(1):
+263. DOI:10.1038/s41746-025-01684-1.
+[6] KANG B, SON M, JEONG W, et al. Large language model-assisted referral triage automation
+
+in a tertiary hospital[J]. npj Digital Medicine, 2026: 1-8. DOI:10.1038/s41746-026-03067-6.
+
+[7] FLANDERS A E, PENG Y, PREVEDELLO L, et al. A multi-agent large language model
+
+framework to automatically assess performance of a clinical AI Triage tool[J]. npj Health Systems,
+
+2026, 3(1): 1-7. DOI:10.1038/s44401-026-00100-4.
+
+[8] ,,,.[J].
+
+,2024,41(10):2906-2910.DOI:10.19734/j.issn.1001-3695.2024.03.0071.
+
+[9] ,,,. [J].
+
+,2025,40(18):10-13.
+
+[10] ,,,.[J].
+
+,2025,16(6):1511-1518.
+
+[11] ,,,.
+
+[J].,2026,(3):88-102.
+
+[12] ,,,.
+
+[J].,2026,42(5):556-562.
+
+[13] ,,,. GraphRAG 
+
+MoE [J].,2026,45(3):447-462.
+
+[14] ,,.[J/OL].
+
+,1-30[2026-08-26].https://doi.org/10.13328/j.cnki.jos.007684.
+
+[15] ,,,.[J/
+
+                                                          79
+                                             
+
+OL].,1-14[2026-08-26].https://link.cnki.net/urlid/51.1307.TP.20260707.1549.012.
+
+[16] ,,,. GPT [J].
+
+,2025,19(8):2043-2056.
+
+[17] ,,.----
+
+          [J/OL].       ,1-18[2026-08-26].https://link.cnki.net/urlid/
+11.1541.G2.20260817.1322.012.
+
+[18] ,,.[J].
+
+,2026,20(4):1031-1045.
+
+[19] ZAKKA C, SHAD R, CHAURASIA A, et al. Almanac--Retrieval-augmented language
+
+models for clinical medicine[J]. NEJM AI, 2024, 1(2). DOI:10.1056/AIoa2300068.
+
+[20] ,,,.TRIPOD-LLM 
+
+[J].,2025,25(8):967-978.
+
+[21] ,,,.[J/OL].
+
+,1-12[2026-08-26].https://link.cnki.net/urlid/62.1026.G2.20260811.1046.002.
+
+[22] ,,,. TRIPOD-LLM 
+
+[J].,2025,105(38):3379-3383.
+
+[23] GALLIFANT J, AFSHAR M, AMEEN S, et al. The TRIPOD-LLM reporting guideline for
+
+studies using large language models[J]. Nature Medicine, 2025, 31(1): 60-69.
+DOI:10.1038/s41591-024-03425-5.
+
+[24] AMUGONGO L M, MASCHERONI P, BROOKS S, et al. Retrieval augmented generation
+
+for large language models in healthcare: A systematic review[J]. PLOS Digital Health, 2025, 4(6):
+e0000877. DOI:10.1371/journal.pdig.0000877.
+
+[25] ,.[J].,2025,28(1):65-
+
+72+79.
+
+[26] ,,.[J].
+
+,2025,40(18):18-21.
+
+[27] ,,,. [J].
+
+,2025,29(8):13-16.DOI:10.19660/j.issn.1671-0592.2025.8.04.
+
+[28] ,,,.[J].
+
+,2025,46(12):32-37.
+
+[29] ,,,.[J].
+
+,2025,28(1):1-6.
+
+[30] ,,,.[J].,2026,53(7):101-
+
+117.
+
+[31] ,,.[J/OL].
+
+,1-24[2026-08-26].https://link.cnki.net/urlid/11.5602.TP.20260615.0939.002.
+
+[32] ,,,.[J/OL].
+
+,1-15[2026-08-26].https://link.cnki.net/urlid/11.2127.tp.20260604.1348.008.
+
+[33] ,,,.[J/OL].
+
+(),1-12[2026-08-26].https://link.cnki.net/urlid/50.1181.N.20260522.1051.002.
+
+[34] ,,,.[J].,2025,20(3):530-
+
+                                                          80
+      
+
+547.
+
+[35] ,,,.----
+
+DeepSeek [J].,2026,17(3):828-833.
+
+[36] ,,,.[J].(
+
+),2025,61(6):1057-1063.DOI:10.13209/j.0479-8023.2025.092.
+
+[37] ALBER D A, YANG Z, ALYAKIN A, et al. Medical large language models are vulnerable
+
+to data-poisoning attacks[J]. Nature Medicine, 2025, 31(2): 618-626. DOI:10.1038/s41591-024-
+03445-1.
+
+[38] .[J].(
+
+),2026,28(3):143-152+164.DOI:10.13916/j.cnki.issn1671-511x.2026.03.009.
+
+[39]   ,    .                    [J].      
+
+,2026,11(1):102-110.DOI:10.19318/j.cnki.issn.2096-1634.20250124.0007.
+
+[40] ,,,.
+
+[J].,2026,29(1):24-32.
+
+[41] ,,,.
+
+[J].,2025,48(10):120-129.DOI:10.16353/j.cnki.1000-7490.2025.10.014.
+
+[42] ,,,.
+
+[J].,2025,16(5):1170-1178.
+
+[43] ,,,. CiteSpace 
+
+[J].,2025,28(25):3200-3208.
+
+[44] ,.[J/OL].
+
+,1-8[2026-08-26].https://link.cnki.net/urlid/31.2200.R.20260821.1512.001.
+
+[45] ,,.[J/OL].
+
+,1-9[2026-08-26].https://link.cnki.net/urlid/15.1011.C.20260811.1007.020.
+
+[46] ,,,."":[J].
+
+,2026,(8):2-18.DOI:10.16582/j.cnki.dzzw.2026.08.001.
+
+      81
+                                             
+
+                                    
+
+     
+
+
+
+
+
+
+     
+
+
+
+
+
+     
+
+
+
+
+
+     
+
+
+
+
+
+     
+
+
+
+     
+
+
+
+     
+
+                                                          82
+                                             
+
+
+
+
+
+
+
+
+                                                          83
+

@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 
@@ -34,6 +35,7 @@ public class AuthController {
     private final LoginAttemptService loginAttempts;
     private final CookieCsrfTokenRepository csrfTokenRepository;
     private final boolean cookieSecure;
+    private final boolean localPasswordLoginEnabled;
     private final int cookieMaxAgeSeconds;
     private final String dummyPasswordHash;
 
@@ -44,6 +46,7 @@ public class AuthController {
             LoginAttemptService loginAttempts,
             CookieCsrfTokenRepository csrfTokenRepository,
             @Value("${medpilot.jwt.cookie-secure:true}") boolean cookieSecure,
+            @Value("${medpilot.identity.local-password-login-enabled:false}") boolean localPasswordLoginEnabled,
             @Value("${medpilot.jwt.expiration-ms:900000}") long expirationMs) {
         this.users = users;
         this.passwordEncoder = passwordEncoder;
@@ -51,6 +54,7 @@ public class AuthController {
         this.loginAttempts = loginAttempts;
         this.csrfTokenRepository = csrfTokenRepository;
         this.cookieSecure = cookieSecure;
+        this.localPasswordLoginEnabled = localPasswordLoginEnabled;
         this.cookieMaxAgeSeconds = Math.max(1, Math.toIntExact(expirationMs / 1000));
         this.dummyPasswordHash = passwordEncoder.encode("medpilot-invalid-password-placeholder");
     }
@@ -60,6 +64,10 @@ public class AuthController {
             @Valid @RequestBody LoginRequest requestBody,
             HttpServletRequest request,
             HttpServletResponse response) {
+        if (!localPasswordLoginEnabled) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.fail("本地密码登录在此环境未启用，请使用医院统一身份认证"));
+        }
         String clientIp = request.getRemoteAddr();
         if (loginAttempts.isBlocked(clientIp, requestBody.username())) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -70,14 +78,18 @@ public class AuthController {
         User user = users.findByUsername(requestBody.username()).orElse(null);
         String encodedPassword = user == null ? dummyPasswordHash : user.getPasswordHash();
         boolean passwordMatches = passwordEncoder.matches(requestBody.password(), encodedPassword);
-        if (user == null || !user.isActive() || !passwordMatches) {
+        if (user == null || !user.isLoginEligibleAt(java.time.Instant.now())
+                || !user.isLocalPasswordEnabled() || !passwordMatches) {
             loginAttempts.recordFailure(clientIp, requestBody.username());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ApiResponse.fail("用户名或密码错误"));
         }
 
         loginAttempts.recordSuccess(clientIp, requestBody.username());
-        String token = jwtService.generate(user.getUsername(), user.getRole());
+        user.markAuthenticated(java.time.Instant.now());
+        users.save(user);
+        String token = jwtService.generate(
+                user.getUsername(), user.getRole(), user.getTokenVersion());
         response.addCookie(authCookie(token, cookieMaxAgeSeconds));
         return ResponseEntity.ok(ApiResponse.ok(Map.of(
                 "role", user.getRole().name(),
@@ -96,7 +108,14 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Map<String, Object>> logout(HttpServletResponse response) {
+    @Transactional
+    public ApiResponse<Map<String, Object>> logout(
+            Authentication authentication,
+            HttpServletResponse response) {
+        users.findByUsername(authentication.getName()).ifPresent(user -> {
+            user.revokeTokens();
+            users.save(user);
+        });
         response.addCookie(authCookie("", 0));
         return ApiResponse.ok(Map.of("loggedOut", true));
     }

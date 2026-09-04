@@ -11,6 +11,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import com.medpilot.runtime.SharedRuntimeStateUnavailable;
 
 /**
  * 全局异常处理器：将业务异常转换为标准化的 HTTP 响应
@@ -39,6 +40,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.fail(e.getMessage()));
+    }
+
+    @ExceptionHandler(SharedRuntimeStateUnavailable.class)
+    public ResponseEntity<ApiResponse<Void>> handleSharedRuntimeStateUnavailable(
+            SharedRuntimeStateUnavailable exception) {
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.fail("shared runtime state unavailable"));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

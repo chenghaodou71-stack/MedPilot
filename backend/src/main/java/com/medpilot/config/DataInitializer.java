@@ -30,9 +30,27 @@ public class DataInitializer {
                     new DemoAccount("doctor", "doctor123", Role.DOCTOR),
                     new DemoAccount("auditor", "auditor123", Role.AUDITOR));
             demoAccounts.forEach(account -> {
-                if (users.findByUsername(account.username()).isEmpty()) {
-                    users.save(new User(account.username(), encoder.encode(account.password()), account.role()));
+                User user = users.findByUsername(account.username()).orElseGet(() ->
+                        new User(account.username(), encoder.encode(account.password()), account.role()));
+                boolean changed = user.getId() == null;
+                if ((account.role() == Role.DOCTOR || account.role() == Role.REVIEWER)
+                        && user.getRole() == account.role()) {
+                    // Dev/test accounts need the same minimum identity claims as
+                    // the clinical-review service, while production remains IdP-bound.
+                    if (!user.hasHospitalStaffProfile()) {
+                        user.setHospitalStaffProfile(
+                                "DEMO-" + account.role().name(),
+                                "DEMO-HOSPITAL",
+                                "MAIN",
+                                "GENERAL");
+                        changed = true;
+                    }
+                    if (user.getMfaAssuranceLevel() < 2) {
+                        user.setMfaAssuranceLevel(2);
+                        changed = true;
+                    }
                 }
+                if (changed) users.save(user);
             });
         };
     }

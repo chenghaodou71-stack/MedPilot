@@ -55,11 +55,20 @@ const traceStatsError = ref('')
 const traceFilterDraft = ref({ status: '', timeout: false, range: [] })
 const traceFilters = ref({ status: '', timeout: false, range: [] })
 
+// The live registry sends a snapshot first and then complete trace snapshots
+// for every update. Keeping those snapshots separate from persisted rows lets
+// the operator see an in-flight request without losing terminal history.
+const liveTraces = ref([])
+const liveConnectionStatus = ref('connecting')
+const liveConnectionError = ref('')
+const selectedLiveKey = ref('')
+
 let chart = null
 let chartResizeObserver = null
 let healthPollTimer = null
 let traceListRequestId = 0
 let traceStatsRequestId = 0
+let liveEventSource = null
 
 const defaultNodes = ['safety_screen', 'extract', 'retrieve', 'classify', 'compose', 'ask_followup']
 const nodeMeta = {
@@ -109,6 +118,58 @@ const nodeMeta = {
 
 const traceEvents = computed(() => traceState.value.events)
 const traceCompleted = computed(() => traceState.value.status === 'done')
+
+function liveTraceKey(snapshot) {
+  return String(snapshot?.requestId || snapshot?.traceId || snapshot?.sessionId || '').trim()
+}
+
+function deriveLiveTrace(snapshot) {
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : []
+  let state = createConsultTraceState()
+  let protocolError = ''
+  for (const event of events) {
+    try {
+      state = reduceConsultTraceEvent(state, event)
+    } catch (error) {
+      protocolError = error.message || '实时链路事件协议异常'
+      break
+    }
+  }
+  return {
+    ...snapshot,
+    key: liveTraceKey(snapshot),
+    events,
+    state,
+    protocolError,
+    nodeEntries: Object.entries(state.nodes),
+  }
+}
+
+const liveTraceRows = computed(() => liveTraces.value
+  .map((snapshot) => deriveLiveTrace(snapshot))
+  .filter((snapshot) => snapshot.key)
+  .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || ''))))
+
+const activeLiveTraceRows = computed(() => liveTraceRows.value
+  .filter((snapshot) => snapshot.status === 'active'))
+
+const liveTerminalRows = computed(() => liveTraceRows.value
+  .filter((snapshot) => ['completed', 'failed', 'cancelled'].includes(snapshot.status))
+  .slice(0, 4))
+
+const liveConnectionLabel = computed(() => ({
+  connected: '实时连接正常',
+  connecting: '正在连接实时流',
+  reconnecting: '实时流断开，正在重连',
+  unavailable: '浏览器不支持实时流',
+}[liveConnectionStatus.value] || '实时流未连接'))
+
+const liveConnectionTagType = computed(() => ({
+  connected: 'success',
+  connecting: 'info',
+  reconnecting: 'warning',
+  unavailable: 'danger',
+}[liveConnectionStatus.value] || 'info'))
 
 const displayNodes = computed(() => {
   const observed = []
@@ -256,11 +317,21 @@ function stateTagType(state) {
 }
 
 function traceStatusLabel(status) {
-  return status === 'failed' ? '执行失败' : status === 'completed' ? '已完成' : '未知状态'
+  return {
+    active: '执行中',
+    completed: '已完成',
+    failed: '执行失败',
+    cancelled: '已取消',
+  }[status] || '未知状态'
 }
 
 function traceStatusType(status) {
-  return status === 'failed' ? 'danger' : status === 'completed' ? 'success' : 'info'
+  return {
+    active: 'primary',
+    completed: 'success',
+    failed: 'danger',
+    cancelled: 'warning',
+  }[status] || 'info'
 }
 
 function tracePhaseLabel(phase) {
@@ -435,6 +506,7 @@ async function openTrace(row) {
 function resetTrace() {
   traceState.value = createConsultTraceState()
   traceError.value = ''
+  selectedLiveKey.value = ''
 }
 
 function nodeState(nodeId) {
@@ -449,6 +521,142 @@ function nodeInfo(nodeId) {
     icon: DataLine,
     tone: 'blue',
   }
+}
+
+function liveNodeState(row, nodeId) {
+  return row?.state?.nodes?.[nodeId]?.status || 'pending'
+}
+
+function liveNodeInfo(row, nodeId) {
+  const fallback = row?.state?.nodes?.[nodeId]?.label || nodeId
+  return nodeMeta[nodeId] || {
+    label: fallback,
+    shortLabel: fallback,
+    description: '协议返回的扩展执行节点',
+    icon: DataLine,
+    tone: 'blue',
+  }
+}
+
+function liveTracePhase(row) {
+  return tracePhaseLabel(row?.state?.phase || row?.events?.at(-1)?.state?.phase)
+}
+
+function applyLiveSnapshot(snapshot) {
+  const derived = deriveLiveTrace(snapshot)
+  traceState.value = derived.state
+  traceId.value = derived.state.traceId || snapshot.traceId || ''
+  traceError.value = derived.protocolError
+    || (snapshot.status === 'failed' ? `实时链路失败：${snapshot.failureCode || '未知错误'}` : '')
+    || (snapshot.status === 'cancelled' ? '实时链路已由浏览器取消。' : '')
+  selectedLiveKey.value = derived.key
+}
+
+function upsertLiveTrace(snapshot) {
+  const key = liveTraceKey(snapshot)
+  if (!key) return
+  const normalized = {
+    ...snapshot,
+    events: Array.isArray(snapshot.events) ? snapshot.events : [],
+  }
+  const index = liveTraces.value.findIndex((item) => liveTraceKey(item) === key)
+  if (index === -1) {
+    liveTraces.value = [...liveTraces.value, normalized]
+  } else {
+    const next = [...liveTraces.value]
+    next[index] = normalized
+    liveTraces.value = next
+  }
+  if (selectedLiveKey.value === key) applyLiveSnapshot(normalized)
+}
+
+function parseLiveUpdate(message) {
+  try {
+    const payload = JSON.parse(message?.data || '')
+    if (!payload || typeof payload !== 'object') throw new Error('实时事件不是对象')
+    return payload
+  } catch (error) {
+    throw new Error(error.message || '实时事件 JSON 无效')
+  }
+}
+
+function handleLiveUpdate(kind, message) {
+  let payload
+  try {
+    payload = parseLiveUpdate(message)
+  } catch (error) {
+    liveConnectionError.value = error.message
+    return
+  }
+  liveConnectionError.value = ''
+
+  if (kind === 'snapshot') {
+    if (!Array.isArray(payload.traces)) {
+      liveConnectionError.value = '实时快照缺少 traces 列表。'
+      return
+    }
+    const snapshots = payload.traces
+    liveTraces.value = snapshots.map((snapshot) => ({
+      ...snapshot,
+      events: Array.isArray(snapshot?.events) ? snapshot.events : [],
+    })).filter((snapshot) => liveTraceKey(snapshot))
+    if (selectedLiveKey.value) {
+      const selected = liveTraces.value.find((snapshot) => liveTraceKey(snapshot) === selectedLiveKey.value)
+      if (selected) applyLiveSnapshot(selected)
+    }
+    return
+  }
+
+  if (!['started', 'event', 'completed', 'failed', 'cancelled'].includes(kind)) return
+  if (!payload.trace || typeof payload.trace !== 'object') {
+    liveConnectionError.value = `实时 ${kind} 事件缺少 trace 快照。`
+    return
+  }
+  upsertLiveTrace(payload.trace)
+  if (['completed', 'failed', 'cancelled'].includes(kind)) {
+    void Promise.allSettled([fetchTraceList(), fetchTraceStats()])
+  }
+}
+
+function connectLiveEvents() {
+  if (typeof EventSource === 'undefined') {
+    liveConnectionStatus.value = 'unavailable'
+    liveConnectionError.value = '当前浏览器不支持实时监控流。'
+    return
+  }
+
+  liveEventSource?.close()
+  liveConnectionStatus.value = 'connecting'
+  liveConnectionError.value = ''
+  const source = new EventSource('/api/monitor/events', { withCredentials: true })
+  liveEventSource = source
+  source.onopen = () => {
+    if (liveEventSource !== source) return
+    liveConnectionStatus.value = 'connected'
+    liveConnectionError.value = ''
+  }
+  source.onerror = () => {
+    if (liveEventSource !== source) return
+    // EventSource retries automatically. The next snapshot is authoritative,
+    // so no local replay or sequence guessing is needed here.
+    liveConnectionStatus.value = 'reconnecting'
+    liveConnectionError.value = '实时监控流已断开，正在等待自动重连。'
+  }
+  for (const kind of ['snapshot', 'started', 'event', 'completed', 'failed', 'cancelled']) {
+    source.addEventListener(kind, (message) => handleLiveUpdate(kind, message))
+  }
+}
+
+function reconnectLiveEvents() {
+  liveEventSource?.close()
+  liveEventSource = null
+  connectLiveEvents()
+}
+
+function inspectLiveTrace(row) {
+  if (!row?.key) return
+  selectedLiveKey.value = row.key
+  applyLiveSnapshot(row)
 }
 
 function appendHealthSample(data) {
@@ -532,7 +740,7 @@ function updateChart() {
       borderColor,
       backgroundColor: surfaceColor,
       textStyle: { color: textColor, fontSize: 12 },
-      extraCssText: 'box-shadow: 0 14px 36px rgba(0, 3, 14, 0.34); backdrop-filter: blur(18px); border-radius: 6px;',
+      extraCssText: 'box-shadow: 0 10px 24px rgba(31, 62, 70, 0.12); backdrop-filter: blur(12px); border-radius: 6px;',
       formatter(params) {
         const item = params[0]
         return `${item.axisValue}<br/>${seriesName}：<strong>${item.value}</strong>`
@@ -604,12 +812,14 @@ async function loadTrace() {
 }
 
 function eventLabel(event) {
+  if (event.type === 'answer_delta') return '回答增量'
   if (event.type === 'done') return '流程完成'
   if (event.type === 'error') return '执行异常'
   return nodeMeta[event.node]?.shortLabel || event.label || event.node
 }
 
 function eventSummary(event) {
+  if (event.type === 'answer_delta') return shorten(event.data?.delta) || '已接收回答增量'
   if (event.type === 'done') return '本次智能体链路已结束'
   if (event.type === 'error') return event.data?.detail || event.detail || '未提供错误详情'
   if (event.status === 'started') return '节点开始执行'
@@ -658,6 +868,7 @@ watch(chartMetric, updateChart)
 
 onMounted(async () => {
   resetTrace()
+  connectLiveEvents()
   await refreshMonitor()
   await nextTick()
   initChart()
@@ -666,6 +877,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  liveEventSource?.close()
+  liveEventSource = null
   if (healthPollTimer) window.clearInterval(healthPollTimer)
   chartResizeObserver?.disconnect()
   window.removeEventListener('medpilot-settings-changed', updateChart)
@@ -711,6 +924,94 @@ onBeforeUnmount(() => {
         <el-button text type="primary" @click="fetchHealth">重新连接</el-button>
       </template>
     </el-alert>
+
+    <section class="mon-live-panel" aria-labelledby="live-trace-title">
+      <div class="mon-panel-heading mon-live-heading">
+        <div>
+          <span>LIVE TRACE STREAM</span>
+          <h2 id="live-trace-title">实时问诊链路</h2>
+          <p>当前活动请求及其智能体节点状态</p>
+        </div>
+        <div class="mon-live-actions">
+          <el-tag size="small" effect="plain" :type="liveConnectionTagType">
+            {{ liveConnectionLabel }}
+          </el-tag>
+          <el-tooltip content="重新连接实时流" placement="bottom">
+            <el-button
+              circle
+              plain
+              aria-label="重新连接实时监控流"
+              @click="reconnectLiveEvents"
+            >
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+          </el-tooltip>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="liveConnectionError"
+        class="mon-live-alert"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="liveConnectionError"
+      />
+
+      <div v-if="!activeLiveTraceRows.length" class="mon-live-empty">
+        <el-icon :size="18"><Monitor /></el-icon>
+        <span>当前没有正在执行的问诊链路</span>
+      </div>
+      <div v-else class="mon-live-grid" aria-live="polite">
+        <article v-for="row in activeLiveTraceRows" :key="row.key" class="mon-live-card">
+          <div class="mon-live-card-heading">
+            <div>
+              <el-tag size="small" type="primary" effect="light">执行中</el-tag>
+              <code :title="row.traceId || row.requestId">
+                {{ compactTraceId(row.traceId || row.requestId, 20) }}
+              </code>
+            </div>
+            <el-button link type="primary" @click="inspectLiveTrace(row)">
+              <el-icon><Search /></el-icon>
+              查看节点
+            </el-button>
+          </div>
+          <div class="mon-live-context">
+            <span>会话 {{ compactTraceId(row.sessionId, 16) }}</span>
+            <span>{{ liveTracePhase(row) }}</span>
+            <span>{{ row.events.length }} 个事件</span>
+          </div>
+          <div v-if="row.protocolError" class="mon-live-protocol-error">
+            {{ row.protocolError }}
+          </div>
+          <div v-if="row.nodeEntries.length" class="mon-live-nodes">
+            <div v-for="[nodeId] in row.nodeEntries" :key="nodeId" class="mon-live-node">
+              <span :class="['mon-live-node-dot', `mon-tone-${liveNodeInfo(row, nodeId).tone}`]" />
+              <span>{{ liveNodeInfo(row, nodeId).shortLabel }}</span>
+              <el-tag :type="stateTagType(liveNodeState(row, nodeId))" size="small" effect="plain">
+                {{ stateLabel(liveNodeState(row, nodeId)) }}
+              </el-tag>
+            </div>
+          </div>
+          <div v-else class="mon-live-awaiting">已建立请求，等待第一个节点事件</div>
+        </article>
+      </div>
+
+      <div v-if="liveTerminalRows.length" class="mon-live-terminal" aria-label="最近实时终态">
+        <span>最近实时终态</span>
+        <button
+          v-for="row in liveTerminalRows"
+          :key="`terminal-${row.key}`"
+          type="button"
+          @click="inspectLiveTrace(row)"
+        >
+          <el-tag size="small" effect="plain" :type="traceStatusType(row.status)">
+            {{ traceStatusLabel(row.status) }}
+          </el-tag>
+          <code>{{ compactTraceId(row.traceId || row.requestId, 16) }}</code>
+        </button>
+      </div>
+    </section>
 
     <section class="mon-status-grid" aria-label="服务运行状态">
       <article v-for="card in statusCards" :key="card.label" class="mon-status-card">
@@ -1155,6 +1456,172 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.mon-live-panel {
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(31, 45, 61, 0.04);
+}
+
+.mon-live-heading {
+  align-items: flex-start;
+}
+
+.mon-live-heading p {
+  margin: 5px 0 0;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.mon-live-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.mon-live-alert {
+  margin-top: 12px;
+}
+
+.mon-live-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border: 1px dashed #dfe4ea;
+  border-radius: 6px;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.mon-live-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+.mon-live-card {
+  min-width: 0;
+  padding: 13px 0;
+  border-top: 1px solid #dfe8f2;
+}
+
+.mon-live-card:first-child {
+  border-top: 0;
+}
+
+.mon-live-card-heading,
+.mon-live-card-heading > div,
+.mon-live-terminal,
+.mon-live-terminal > button {
+  display: flex;
+  align-items: center;
+}
+
+.mon-live-card-heading {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mon-live-card-heading > div {
+  min-width: 0;
+  gap: 8px;
+}
+
+.mon-live-card-heading code,
+.mon-live-terminal code {
+  overflow: hidden;
+  color: #7047b8;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mon-live-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 10px;
+  color: #667085;
+  font-size: 11px;
+}
+
+.mon-live-protocol-error {
+  margin-top: 8px;
+  color: #d92d3a;
+  font-size: 11px;
+}
+
+.mon-live-nodes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.mon-live-node {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #475467;
+  font-size: 11px;
+}
+
+.mon-live-node > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mon-live-node-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.mon-live-awaiting {
+  margin-top: 11px;
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.mon-live-terminal {
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid #edf0f4;
+}
+
+.mon-live-terminal > span {
+  color: #667085;
+  font-size: 11px;
+}
+
+.mon-live-terminal > button {
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mon-live-terminal > button:hover code {
+  text-decoration: underline;
 }
 
 .mon-status-card,
@@ -1869,7 +2336,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Unified deep-space monitoring workspace. */
+/* Unified light monitoring workspace. */
 .mon-page {
   gap: 16px;
   color: var(--text-primary);
@@ -1895,9 +2362,9 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-lg);
   background:
     linear-gradient(108deg, rgba(88, 190, 255, 0.075), transparent 44%, rgba(187, 124, 255, 0.055)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
-  box-shadow: inset 0 1px 0 rgba(218, 243, 255, 0.09), 0 13px 32px rgba(0, 3, 14, 0.17);
-  backdrop-filter: blur(18px) saturate(132%);
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .mon-status-grid::before,
@@ -1940,9 +2407,9 @@ onBeforeUnmount(() => {
   border: 0;
   background:
     linear-gradient(128deg, rgba(86, 187, 250, 0.065), transparent 42%, rgba(184, 120, 255, 0.05)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
-  box-shadow: inset 0 1px 0 rgba(217, 243, 255, 0.085), 0 14px 34px rgba(0, 3, 14, 0.18);
-  backdrop-filter: blur(18px) saturate(132%);
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .mon-status-icon,
@@ -1992,11 +2459,11 @@ onBeforeUnmount(() => {
 
 .mon-trace-empty,
 .mon-chart-sparse {
-  border: 0;
+  border: 1px solid var(--border-default);
   background:
     linear-gradient(110deg, rgba(88, 188, 251, 0.09), rgba(185, 122, 255, 0.055)),
-    rgba(5, 16, 35, 0.48);
-  box-shadow: inset 0 1px 0 rgba(217, 243, 255, 0.09), 0 10px 26px rgba(0, 3, 14, 0.16);
+    var(--surface-muted);
+  box-shadow: var(--shadow-sm);
 }
 
 .mon-event-log {
@@ -2064,12 +2531,82 @@ onBeforeUnmount(() => {
   }
 }
 
+.mon-live-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 0;
+  background:
+    linear-gradient(128deg, rgba(86, 187, 250, 0.065), transparent 42%, rgba(184, 120, 255, 0.05)),
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
+}
+
+.mon-live-panel::before {
+  position: absolute;
+  top: 0;
+  right: 4%;
+  left: 4%;
+  z-index: 0;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgba(94, 210, 255, 0.43), rgba(189, 127, 255, 0.33), transparent);
+  pointer-events: none;
+}
+
+.mon-live-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.mon-live-card {
+  border-color: rgba(122, 182, 231, 0.14);
+  background: transparent;
+  box-shadow: none;
+}
+
+.mon-live-node {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-muted);
+}
+
+.mon-live-empty {
+  border-color: var(--border-default);
+  background: var(--surface-muted);
+}
+
+.mon-live-terminal {
+  border-color: var(--border-subtle);
+}
+
+@media (max-width: 700px) {
+  .mon-live-panel {
+    padding: 16px 14px;
+  }
+
+  .mon-live-heading {
+    flex-direction: column;
+  }
+
+  .mon-live-grid,
+  .mon-live-nodes {
+    grid-template-columns: 1fr;
+  }
+
+  .mon-live-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 @supports not ((backdrop-filter: blur(1px))) {
   .mon-status-grid,
   .mon-chart-panel,
   .mon-node-panel,
   .mon-trace-panel,
-  .mon-trace-inventory {
+  .mon-trace-inventory,
+  .mon-live-panel {
     background: var(--surface-base);
   }
 }
@@ -2085,9 +2622,9 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-lg);
   background:
     linear-gradient(128deg, rgba(86, 187, 250, 0.065), transparent 42%, rgba(184, 120, 255, 0.05)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
-  box-shadow: inset 0 1px 0 rgba(217, 243, 255, 0.085), 0 14px 34px rgba(0, 3, 14, 0.18);
-  backdrop-filter: blur(18px) saturate(132%);
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .mon-trace-inventory::before {
@@ -2198,9 +2735,9 @@ onBeforeUnmount(() => {
   gap: 9px;
   margin-top: 16px;
   padding: 10px;
-  border: 1px solid rgba(122, 182, 231, 0.14);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md, 6px);
-  background: rgba(4, 16, 36, 0.28);
+  background: var(--surface-muted);
 }
 
 .mon-trace-filter-control,

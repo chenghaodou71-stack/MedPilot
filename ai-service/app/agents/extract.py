@@ -9,6 +9,7 @@ from collections.abc import Mapping
 
 from app.ollama_client import chat as ollama_chat
 from app.agents.danger import DANGER_SIGN_TERMS, match_danger_signs
+from app.rag.entity_normalizer import normalize_symptoms
 from app.schemas import StructuredSymptoms
 
 ChatFn = Callable[..., Awaitable[str]]
@@ -61,7 +62,9 @@ async def extract(
     raw = await chat_fn(prompt, system=_SYSTEM)
     data = _parse_llm_json(raw)
 
-    symptoms = tuple(str(s) for s in data.get("symptoms", []) if s)
+    symptoms = normalize_symptoms(
+        str(s) for s in data.get("symptoms", []) if s
+    )
     hist = tuple(str(h) for h in data.get("history", []) if h)
     return StructuredSymptoms(
         symptoms=symptoms,

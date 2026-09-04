@@ -19,11 +19,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -123,8 +125,8 @@ class ConsultControllerContractTest {
 
     @Test
     void mapsUpstreamFailureBeforeFirstEventToBadGateway() throws Exception {
-        when(aiClient.consult(anyString(), anyString(), anyMap()))
-                .thenReturn(Flux.error(new IllegalStateException("offline")));
+        when(aiClient.openConsult(anyString(), anyString(), anyMap(), anyList()))
+                .thenReturn(Mono.error(new IllegalStateException("offline")));
 
         MvcResult pending = mvc.perform(post("/api/consult")
                         .cookie(userCookie)
@@ -176,8 +178,8 @@ class ConsultControllerContractTest {
             HttpStatus upstreamStatus,
             String sessionId,
             String expectedError) throws Exception {
-        when(aiClient.consult(anyString(), anyString(), anyMap()))
-                .thenReturn(Flux.error(WebClientResponseException.create(
+        when(aiClient.openConsult(anyString(), anyString(), anyMap(), anyList()))
+                .thenReturn(Mono.error(WebClientResponseException.create(
                         upstreamStatus.value(),
                         upstreamStatus.getReasonPhrase(),
                         HttpHeaders.EMPTY,

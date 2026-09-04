@@ -19,6 +19,14 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import {
+  buildKnowledgeUploadFormData,
+  buildKnowledgeReviewPayload,
+  formatKnowledgeHitRate,
+  knowledgeFailureSummary,
+  knowledgePermissions,
+  validateKnowledgeFile,
+} from '../lib/knowledgeGovernance'
 
 const auth = useAuthStore()
 
@@ -44,7 +52,12 @@ const loadError = ref('')
 const versionError = ref('')
 const searchText = ref('')
 const ingestVisible = ref(false)
+const ingestMode = ref('file')
+const selectedFile = ref(null)
+const uploadRef = ref(null)
 const formRef = ref(null)
+
+const permissions = computed(() => knowledgePermissions(auth.role))
 
 function emptyIngestForm() {
   return {
@@ -59,6 +72,7 @@ function emptyIngestForm() {
     expires_at: '',
     change_reason: '',
     text: '',
+    file: null,
     reviewApproved: false,
   }
 }
@@ -89,6 +103,20 @@ function validateApproval(_rule, value, callback) {
   else callback(new Error('请确认资料已完成来源与内容审核'))
 }
 
+function validateIngestContent(_rule, _value, callback) {
+  if (ingestMode.value === 'file') {
+    const message = validateKnowledgeFile(selectedFile.value)
+    callback(message ? new Error(message) : undefined)
+    return
+  }
+  if (normalizeText(form.text).length > 200000) {
+    callback(new Error('正文不能超过 200000 个字符'))
+    return
+  }
+  if (!normalizeText(form.text)) callback(new Error('请输入医学资料正文'))
+  else callback()
+}
+
 const form = reactive(emptyIngestForm())
 const departments = ['心血管内科', '呼吸内科', '消化内科', '皮肤科']
 const formRules = {
@@ -106,7 +134,8 @@ const formRules = {
   published_date: [{ required: true, message: '请选择发布日期', trigger: 'change' }],
   version: [{ required: true, message: '请输入资料版本', trigger: 'blur' }],
   license: [{ required: true, message: '请输入许可信息', trigger: 'blur' }],
-  text: [{ required: true, message: '请输入医学资料正文', trigger: 'blur' }],
+  text: [{ validator: validateIngestContent, trigger: 'blur' }],
+  file: [{ validator: validateIngestContent, trigger: 'change' }],
   reviewApproved: [{ validator: validateApproval, trigger: 'change' }],
 }
 
@@ -195,6 +224,17 @@ const metricItems = computed(() => [
   },
 ])
 
+const statusRows = computed(() => ({
+  parsing: Object.entries(stats.value?.parsing_statuses || {}),
+  vector: Object.entries(stats.value?.vector_statuses || {}),
+}))
+
+const retrievalStats = computed(() => ({
+  requests: Number(stats.value?.retrieval_requests) || 0,
+  hits: Number(stats.value?.retrieval_hits) || 0,
+  hitRate: formatKnowledgeHitRate(stats.value?.hit_rate),
+}))
+
 const filteredDocs = computed(() => {
   const keyword = searchText.value.trim().toLocaleLowerCase('zh-CN')
   if (!keyword) return docs.value
@@ -208,6 +248,10 @@ const filteredDocs = computed(() => {
       doc.title,
       doc.published_date,
       doc.text_preview,
+      doc.source_type,
+      doc.parsing_status,
+      doc.vector_status,
+      knowledgeFailureSummary(doc),
     ]
       .map((value) => normalizeText(value).toLocaleLowerCase('zh-CN'))
       .some((value) => value.includes(keyword)),
@@ -266,6 +310,42 @@ function reviewStatusType(status) {
   return { approved: 'success', pending: 'warning', rejected: 'danger' }[status] || 'info'
 }
 
+function processingStatusLabel(status) {
+  return {
+    parsing: '解析中',
+    completed: '解析完成',
+    failed: '解析失败',
+    pending: '待处理',
+  }[normalizeText(status).toLowerCase()] || normalizeText(status) || '未知'
+}
+
+function processingStatusType(status) {
+  return { completed: 'success', parsing: 'warning', failed: 'danger', pending: 'info' }[
+    normalizeText(status).toLowerCase()
+  ] || 'info'
+}
+
+function vectorStatusLabel(status) {
+  return {
+    completed: '向量完成',
+    pending: '向量待构建',
+    failed: '向量失败',
+    building: '向量构建中',
+  }[normalizeText(status).toLowerCase()] || normalizeText(status) || '未知'
+}
+
+function vectorStatusType(status) {
+  return { completed: 'success', pending: 'warning', failed: 'danger', building: 'warning' }[
+    normalizeText(status).toLowerCase()
+  ] || 'info'
+}
+
+function sourceTypeLabel(value) {
+  return { txt: 'TXT', md: 'Markdown', pdf: 'PDF', text: '文本' }[
+    normalizeText(value).toLowerCase()
+  ] || normalizeText(value).toUpperCase() || '来源类型未标注'
+}
+
 async function fetchStats() {
   loadingStats.value = true
   try {
@@ -316,11 +396,43 @@ async function refreshAll() {
 }
 
 function openIngest() {
+  if (!permissions.value.canEdit) return
   ingestVisible.value = true
 }
 
+function handleFileChange(uploadFile) {
+  const file = uploadFile?.raw || uploadFile
+  const message = validateKnowledgeFile(file)
+  if (message) {
+    selectedFile.value = null
+    form.file = null
+    uploadRef.value?.clearFiles()
+    ElMessage.error(message)
+    return
+  }
+  selectedFile.value = file
+  form.file = file
+  formRef.value?.clearValidate('file')
+}
+
+function handleFileRemove() {
+  selectedFile.value = null
+  form.file = null
+}
+
+function handleFileExceed() {
+  ElMessage.warning('一次只能选择一个知识文件，请先移除当前文件。')
+}
+
+function resetIngestForm() {
+  Object.assign(form, emptyIngestForm())
+  selectedFile.value = null
+  uploadRef.value?.clearFiles()
+  formRef.value?.clearValidate()
+}
+
 async function handleIngest() {
-  if (submitting.value) return
+  if (submitting.value || !permissions.value.canEdit) return
 
   try {
     await formRef.value?.validate()
@@ -344,14 +456,17 @@ async function handleIngest() {
       license: normalizeText(form.license),
       expires_at: normalizeText(form.expires_at),
       change_reason: normalizeText(form.change_reason),
-      review_status: 'pending',
       text: normalizeText(form.text),
     }
-    await client.post('/knowledge/ingest', payload)
+    if (ingestMode.value === 'file') {
+      const uploadPayload = buildKnowledgeUploadFormData(payload, selectedFile.value)
+      await client.post('/knowledge/upload', uploadPayload)
+    } else {
+      await client.post('/knowledge/ingest', { ...payload, source_type: 'text' })
+    }
     ElMessage.success(`文档“${payload.doc_id}”已提交审核，通过后才会进入检索索引`)
     ingestVisible.value = false
-    Object.assign(form, emptyIngestForm())
-    formRef.value?.clearValidate()
+    resetIngestForm()
     await refreshAll()
   } catch (error) {
     ElMessage.error(errorMessage(error, '录入失败，请检查 AI 服务与向量模型状态。'))
@@ -361,7 +476,7 @@ async function handleIngest() {
 }
 
 async function handleReview(doc, action) {
-  if (!doc?.doc_id || reviewingId.value) return
+  if (!doc?.doc_id || reviewingId.value || !permissions.value.canReview) return
   const approving = action === 'approve'
   let reason = ''
   try {
@@ -383,11 +498,10 @@ async function handleReview(doc, action) {
 
   reviewingId.value = doc.doc_id
   try {
-    const { data } = await client.post(`/knowledge/docs/${encodeURIComponent(doc.doc_id)}/review`, {
-      action,
-      reviewer: auth.username || 'admin',
-      change_reason: reason,
-    })
+    const { data } = await client.post(
+      `/knowledge/docs/${encodeURIComponent(doc.doc_id)}/review`,
+      buildKnowledgeReviewPayload(action, reason),
+    )
     const payload = responsePayload(data)
     const version = normalizeText(payload?.version)
     ElMessage.success(
@@ -404,6 +518,7 @@ async function handleReview(doc, action) {
 }
 
 async function handleDelete(docId) {
+  if (!permissions.value.canEdit) return
   try {
     await ElMessageBox.confirm(
       `删除“${docId}”后将生成新的待激活索引版本，是否继续？`,
@@ -437,7 +552,7 @@ async function handleDelete(docId) {
 }
 
 async function handleBuildVersion() {
-  if (buildingVersion.value) return
+  if (buildingVersion.value || !permissions.value.canEdit) return
 
   buildingVersion.value = true
   try {
@@ -455,7 +570,7 @@ async function handleBuildVersion() {
 
 async function handleActivateVersion(version) {
   const versionId = normalizeText(version?.version)
-  if (!versionId || isActiveVersion(version) || activatingVersion.value) return
+  if (!versionId || isActiveVersion(version) || activatingVersion.value || !permissions.value.canReview) return
 
   try {
     await ElMessageBox.confirm(
@@ -539,7 +654,7 @@ onMounted(refreshAll)
             <el-icon v-if="!isLoading"><Refresh /></el-icon>
           </el-button>
         </el-tooltip>
-        <el-button type="primary" @click="openIngest">
+        <el-button v-if="permissions.canEdit" type="primary" @click="openIngest">
           <el-icon><Plus /></el-icon>
           录入文档
         </el-button>
@@ -608,6 +723,7 @@ onMounted(refreshAll)
           <h2>索引版本</h2>
         </div>
         <el-button
+          v-if="permissions.canEdit"
           type="primary"
           plain
           :loading="buildingVersion"
@@ -683,7 +799,7 @@ onMounted(refreshAll)
               当前版本
             </el-tag>
             <el-button
-              v-else
+              v-else-if="permissions.canReview"
               size="small"
               type="primary"
               plain
@@ -705,6 +821,32 @@ onMounted(refreshAll)
           </div>
         </div>
       </template>
+    </section>
+
+    <section class="kbx-governance-summary" aria-label="知识处理与检索统计">
+      <div class="kbx-governance-block">
+        <span>解析状态</span>
+        <div class="kbx-governance-tags">
+          <el-tag v-for="[status, count] in statusRows.parsing" :key="`parse-${status}`" size="small" :type="processingStatusType(status)">
+            {{ processingStatusLabel(status) }} {{ count }}
+          </el-tag>
+          <small v-if="!statusRows.parsing.length">暂无数据</small>
+        </div>
+      </div>
+      <div class="kbx-governance-block">
+        <span>向量状态</span>
+        <div class="kbx-governance-tags">
+          <el-tag v-for="[status, count] in statusRows.vector" :key="`vector-${status}`" size="small" :type="vectorStatusType(status)">
+            {{ vectorStatusLabel(status) }} {{ count }}
+          </el-tag>
+          <small v-if="!statusRows.vector.length">暂无数据</small>
+        </div>
+      </div>
+      <div class="kbx-governance-block kbx-retrieval-stats">
+        <span>检索请求</span>
+        <strong>{{ retrievalStats.requests }}</strong>
+        <small>{{ retrievalStats.hits }} 次命中 · 命中率 {{ retrievalStats.hitRate }}</small>
+      </div>
     </section>
 
     <el-dialog
@@ -827,7 +969,7 @@ onMounted(refreshAll)
         <el-button v-if="searchText.trim()" type="primary" plain @click="searchText = ''">
           清除检索
         </el-button>
-        <el-button v-else type="primary" @click="openIngest">录入首篇文档</el-button>
+        <el-button v-else-if="permissions.canEdit" type="primary" @click="openIngest">录入首篇文档</el-button>
       </el-empty>
       <div v-else class="kbx-doc-list">
         <article v-for="doc in filteredDocs" :key="doc.doc_id" class="kbx-doc-row">
@@ -841,6 +983,7 @@ onMounted(refreshAll)
             <p>{{ normalizeText(doc.text_preview) || '接口未提供内容摘要' }}</p>
             <div class="kbx-doc-meta">
               <el-tag size="small" effect="light">{{ normalizeText(doc.department) || '科室未标注' }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">{{ sourceTypeLabel(doc.source_type || 'text') }}</el-tag>
               <el-tag
                 size="small"
                 :type="reviewStatusType(doc.review_status)"
@@ -852,11 +995,24 @@ onMounted(refreshAll)
               <span v-if="normalizeText(doc.institution)"><el-icon><OfficeBuilding /></el-icon>{{ doc.institution }}</span>
               <span v-if="normalizeText(doc.published_date)"><el-icon><Clock /></el-icon>{{ doc.published_date }}</span>
               <span><el-icon><Grid /></el-icon>{{ Number(doc.chunk_count) || 0 }} 个知识切片</span>
+              <el-tag size="small" :type="processingStatusType(doc.parsing_status)" effect="plain">
+                {{ processingStatusLabel(doc.parsing_status) }}
+              </el-tag>
+              <el-tag size="small" :type="vectorStatusType(doc.vector_status)" effect="plain">
+                {{ vectorStatusLabel(doc.vector_status) }}
+              </el-tag>
             </div>
+            <el-alert
+              v-if="knowledgeFailureSummary(doc)"
+              class="kbx-doc-failure"
+              type="error"
+              :closable="false"
+              :title="`处理失败：${knowledgeFailureSummary(doc)}`"
+            />
           </div>
 
           <div class="kbx-doc-actions">
-            <template v-if="doc.review_status !== 'approved'">
+            <template v-if="permissions.canReview && doc.review_status !== 'approved'">
               <el-button
                 size="small"
                 type="success"
@@ -873,7 +1029,7 @@ onMounted(refreshAll)
                 @click="handleReview(doc, 'reject')"
               >退回</el-button>
             </template>
-            <el-tooltip content="删除文档" placement="left">
+            <el-tooltip v-if="permissions.canEdit" content="删除文档" placement="left">
               <el-button
                 class="kbx-delete-button"
                 text
@@ -903,10 +1059,14 @@ onMounted(refreshAll)
       :close-on-press-escape="!submitting"
     >
       <p class="kbx-dialog-intro">提交后进入待审核队列，只有复核通过的资料才会构建索引版本。</p>
+      <el-radio-group v-model="ingestMode" class="kbx-ingest-mode" aria-label="录入方式">
+        <el-radio-button value="file">上传文件</el-radio-button>
+        <el-radio-button value="paste">粘贴正文</el-radio-button>
+      </el-radio-group>
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top">
         <div class="kbx-form-grid">
           <el-form-item label="文档 ID" prop="doc_id">
-            <el-input v-model="form.doc_id" placeholder="例如 guideline-headache-2024" />
+            <el-input v-model="form.doc_id" maxlength="128" placeholder="例如 guideline-headache-2024" />
           </el-form-item>
           <el-form-item label="所属科室" prop="department">
             <el-select v-model="form.department" placeholder="选择专科">
@@ -956,12 +1116,31 @@ onMounted(refreshAll)
             <el-input v-model="form.license" maxlength="512" placeholder="例如 CC BY 4.0" />
           </el-form-item>
         </div>
-        <el-form-item label="医学资料正文" prop="text">
+        <el-form-item v-if="ingestMode === 'file'" label="知识文件（TXT / MD / PDF，最大 10 MB）" prop="file">
+          <el-upload
+            ref="uploadRef"
+            class="kbx-file-upload"
+            drag
+            :auto-upload="false"
+            :limit="1"
+            accept=".txt,.md,.pdf,text/plain,application/pdf"
+            :on-change="handleFileChange"
+            :on-remove="handleFileRemove"
+            :on-exceed="handleFileExceed"
+          >
+            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+            <div class="el-upload__text">将文件拖到此处，或 <em>点击选择</em></div>
+            <template #tip>
+              <div class="el-upload__tip">服务端按扩展名解析并记录解析、向量化失败状态。</div>
+            </template>
+          </el-upload>
+        </el-form-item>
+        <el-form-item v-else label="医学资料正文" prop="text">
           <el-input
             v-model="form.text"
             type="textarea"
-            :rows="7"
-            maxlength="12000"
+            :rows="9"
+            maxlength="200000"
             show-word-limit
             resize="vertical"
             placeholder="录入用于检索的医学资料正文"
@@ -1785,7 +1964,7 @@ onMounted(refreshAll)
   }
 }
 
-/* Borderless deep-space workspace surfaces. */
+/* Light clinical workspace surfaces. */
 .kbx-page {
   gap: 16px;
 }
@@ -1800,9 +1979,9 @@ onMounted(refreshAll)
   border: 0;
   background:
     linear-gradient(128deg, rgba(87, 188, 255, 0.07), transparent 38%, rgba(184, 121, 255, 0.055)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
-  box-shadow: inset 0 1px 0 rgba(215, 242, 255, 0.09), 0 14px 34px rgba(0, 3, 14, 0.18);
-  backdrop-filter: blur(18px) saturate(132%);
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .kbx-search-panel::before,
@@ -1829,7 +2008,7 @@ onMounted(refreshAll)
   border: 0;
   background:
     linear-gradient(120deg, rgba(91, 200, 255, 0.13), transparent 42%, rgba(184, 121, 255, 0.1)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
+    var(--glass-surface, var(--surface-elevated, #ffffff));
   box-shadow: inset 0 1px 0 rgba(220, 245, 255, 0.13), 0 0 28px rgba(84, 181, 246, 0.16);
   animation: kbx-index-glow 2.8s ease-in-out infinite;
 }
@@ -1843,9 +2022,9 @@ onMounted(refreshAll)
   border-radius: var(--radius-lg);
   background:
     linear-gradient(105deg, rgba(87, 188, 255, 0.07), transparent 45%, rgba(246, 191, 104, 0.045)),
-    var(--glass-surface, rgba(12, 28, 55, 0.66));
-  box-shadow: inset 0 1px 0 rgba(215, 242, 255, 0.08), 0 12px 30px rgba(0, 3, 14, 0.16);
-  backdrop-filter: blur(18px) saturate(132%);
+    var(--glass-surface, var(--surface-elevated, #ffffff));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .kbx-metric {
@@ -1917,8 +2096,8 @@ onMounted(refreshAll)
 }
 
 .kbx-search-input :deep(.el-input__wrapper) {
-  background: rgba(5, 16, 35, 0.56);
-  box-shadow: inset 0 0 0 1px rgba(132, 196, 248, 0.16) !important;
+  background: var(--control-surface, #ffffff);
+  box-shadow: inset 0 0 0 1px var(--border-default) !important;
 }
 
 .kbx-search-input :deep(.el-input__wrapper.is-focus) {
@@ -2077,7 +2256,75 @@ onMounted(refreshAll)
   min-height: 180px;
 }
 
+.kbx-governance-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kbx-governance-block {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface, var(--surface-elevated));
+}
+
+.kbx-governance-block > span,
+.kbx-governance-block > small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.kbx-governance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.kbx-retrieval-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 4px 10px;
+}
+
+.kbx-retrieval-stats strong {
+  font-size: 24px;
+}
+
+.kbx-retrieval-stats small {
+  grid-column: 1 / -1;
+}
+
+.kbx-doc-failure {
+  margin-top: 9px;
+}
+
+.kbx-doc-failure :deep(.el-alert__title) {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.kbx-ingest-mode {
+  margin: 0 0 16px;
+}
+
+.kbx-file-upload {
+  width: 100%;
+}
+
+.kbx-file-upload :deep(.el-upload),
+.kbx-file-upload :deep(.el-upload-dragger) {
+  width: 100%;
+}
+
 @media (max-width: 640px) {
+  .kbx-governance-summary {
+    grid-template-columns: 1fr;
+  }
+
   .kbx-diff-toolbar {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }

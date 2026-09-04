@@ -33,7 +33,9 @@ class ConsultControllerEventParsingTest {
                 node(9, "compose", "started", "composing", "{}"),
                 node(10, "compose", "completed", "composing",
                         "{\"answer\":{\"text\":\"建议前往呼吸内科。\",\"citations\":[{\"citation_id\":\"resp-1#0\",\"doc_id\":\"resp-1\",\"chunk_id\":\"resp-1#0\",\"source\":\"呼吸指南\",\"department\":\"呼吸内科\",\"quote\":\"咳嗽伴发热应评估。\",\"score\":0.86,\"index_version\":\"v1\"}],\"safety_boundary\":\"不替代执业医生。\"}}"),
-                done(11, "completed")
+                answerDelta(11, "建议前往"),
+                answerDelta(12, "呼吸内科。"),
+                doneWithComposedAnswer(13)
         );
 
         events.forEach(accumulator::accept);
@@ -48,7 +50,7 @@ class ConsultControllerEventParsingTest {
         assertThat(mapper.readTree(snapshot.citationsJson())).hasSize(1);
         assertThat(mapper.readTree(snapshot.citationsJson()).get(0).path("quote").asText())
                 .isEqualTo("咳嗽伴发热应评估。");
-        assertThat(mapper.readTree(snapshot.eventsJson())).hasSize(11);
+        assertThat(mapper.readTree(snapshot.eventsJson())).hasSize(13);
     }
 
     @Test
@@ -126,6 +128,55 @@ class ConsultControllerEventParsingTest {
                 .hasMessageContaining("phase");
     }
 
+    @Test
+    void acceptsValidatedAnswerDeltasWhoseConcatenationMatchesTheFinalAnswer() throws Exception {
+        ConsultationEventAccumulator accumulator = accumulator();
+        accumulator.accept(node(1, "compose", "started", "composing", "{}"));
+        accumulator.accept(node(2, "compose", "completed", "composing",
+                "{\"answer\":{\"text\":\"建议前往呼吸内科。\",\"citations\":[]}}"));
+        accumulator.accept(answerDelta(3, "建议前往"));
+        accumulator.accept(answerDelta(4, "呼吸内科。"));
+        accumulator.accept(doneWithAnswer(5, "建议前往呼吸内科。"));
+
+        ConsultationEventAccumulator.Snapshot snapshot = accumulator.finish();
+
+        assertThat(snapshot.answer()).isEqualTo("建议前往呼吸内科。");
+        assertThat(mapper.createParser(snapshot.eventsJson()).readValueAsTree().size()).isEqualTo(5);
+    }
+
+    @Test
+    void rejectsAnswerDeltaBeforeValidatedComposeCompletion() {
+        ConsultationEventAccumulator accumulator = accumulator();
+
+        assertThatThrownBy(() -> accumulator.accept(answerDelta(1, "不应提前输出")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("compose");
+    }
+
+    @Test
+    void rejectsAnswerDeltasThatDoNotMatchTheValidatedFinalAnswer() {
+        ConsultationEventAccumulator accumulator = accumulator();
+        accumulator.accept(node(1, "compose", "started", "composing", "{}"));
+        accumulator.accept(node(2, "compose", "completed", "composing",
+                "{\"answer\":{\"text\":\"安全回答\",\"citations\":[]}}"));
+        assertThatThrownBy(() -> accumulator.accept(answerDelta(3, "被篡改回答")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("answer_delta");
+    }
+
+    @Test
+    void rejectsFinalAnswerWhenDoneOmitsItsMatchingAnswerObject() {
+        ConsultationEventAccumulator accumulator = accumulator();
+        accumulator.accept(node(1, "compose", "started", "composing", "{}"));
+        accumulator.accept(node(2, "compose", "completed", "composing",
+                "{\"answer\":{\"text\":\"安全回答\",\"citations\":[]}}"));
+        accumulator.accept(answerDelta(3, "安全回答"));
+
+        assertThatThrownBy(() -> accumulator.accept(done(4, "completed")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("done answer");
+    }
+
     private ConsultationEventAccumulator accumulator() {
         return new ConsultationEventAccumulator(mapper, SESSION_ID);
     }
@@ -145,5 +196,36 @@ class ConsultControllerEventParsingTest {
                 + ",\"type\":\"done\",\"status\":\"completed\",\"elapsed_ms\":0,"
                 + "\"state\":{\"intent\":\"medical_consult\",\"phase\":\"" + phase
                 + "\",\"turn_count\":1,\"history_mode\":\"full\"},\"data\":{}}";
+    }
+
+    private String doneWithAnswer(int sequence, String answer) {
+        return "{\"protocol_version\":\"1.0\",\"trace_id\":\"" + TRACE_ID
+                + "\",\"session_id\":\"" + SESSION_ID + "\",\"sequence\":" + sequence
+                + ",\"type\":\"done\",\"status\":\"completed\",\"elapsed_ms\":0,"
+                + "\"state\":{\"intent\":\"medical_consult\",\"phase\":\"completed\","
+                + "\"turn_count\":1,\"history_mode\":\"full\"},"
+                + "\"data\":{\"answer\":{\"text\":\"" + answer + "\",\"citations\":[]}}}";
+    }
+
+    private String answerDelta(int sequence, String delta) {
+        return "{\"protocol_version\":\"1.0\",\"trace_id\":\"" + TRACE_ID
+                + "\",\"session_id\":\"" + SESSION_ID + "\",\"sequence\":" + sequence
+                + ",\"type\":\"answer_delta\",\"status\":\"streaming\",\"elapsed_ms\":0,"
+                + "\"state\":{\"intent\":\"medical_consult\",\"phase\":\"composing\","
+                + "\"turn_count\":1,\"history_mode\":\"full\"},"
+                + "\"data\":{\"delta\":\"" + delta + "\"}}";
+    }
+
+    private String doneWithComposedAnswer(int sequence) {
+        return "{\"protocol_version\":\"1.0\",\"trace_id\":\"" + TRACE_ID
+                + "\",\"session_id\":\"" + SESSION_ID + "\",\"sequence\":" + sequence
+                + ",\"type\":\"done\",\"status\":\"completed\",\"elapsed_ms\":0,"
+                + "\"state\":{\"intent\":\"medical_consult\",\"phase\":\"completed\","
+                + "\"turn_count\":1,\"history_mode\":\"full\"},"
+                + "\"data\":{\"answer\":{\"text\":\"建议前往呼吸内科。\",\"citations\":[{"
+                + "\"citation_id\":\"resp-1#0\",\"doc_id\":\"resp-1\",\"chunk_id\":\"resp-1#0\","
+                + "\"source\":\"呼吸指南\",\"department\":\"呼吸内科\","
+                + "\"quote\":\"咳嗽伴发热应评估。\",\"score\":0.86,\"index_version\":\"v1\"}],"
+                + "\"safety_boundary\":\"不替代执业医生。\"}}}";
     }
 }

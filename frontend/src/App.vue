@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Database,
   FileClock,
+  ClipboardCheck,
   LogOut,
   Menu,
   MessageCircleMore,
@@ -65,6 +66,7 @@ const allNavItems = [
   { page: 'profile', label: '健康档案', icon: HeartPulse, admin: false },
   { page: 'health', label: '健康检索', icon: SearchCheck, admin: false },
   { page: 'knowledge', label: '医学知识库', icon: Database, admin: true },
+  { page: 'clinical-reviews', permission: 'reviews', label: '医生复核', icon: ClipboardCheck, admin: true },
   { page: 'monitor', label: '智能体监控', icon: MonitorCog, admin: true },
   { page: 'users', label: '用户权限', icon: UsersRound, admin: true },
   { page: 'audit', label: '审计日志', icon: ShieldCheck, admin: true },
@@ -73,13 +75,13 @@ const allNavItems = [
 ]
 
 const navItems = computed(() => allNavItems.filter((item) => (
-  !item.admin || auth.canAccess(MANAGEMENT_ROLES[item.page])
+  !item.admin || auth.canAccess(MANAGEMENT_ROLES[item.permission || item.page])
 )))
 const patientNavItems = computed(() => allNavItems.filter((item) => (
   !item.admin && item.page !== 'settings'
 )))
 const adminNavItems = computed(() => allNavItems.filter((item) => (
-  item.admin && auth.canAccess(MANAGEMENT_ROLES[item.page])
+  item.admin && auth.canAccess(MANAGEMENT_ROLES[item.permission || item.page])
 )))
 const brandTarget = computed(() => (isAdminWorkspace.value ? auth.homePath : '/consult'))
 
@@ -936,7 +938,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Deep-space application shell. The views inherit their palette from style.css. */
+/* Shared medical workspace shell. Both patient and admin workspaces use the same light foundation. */
 .med-app {
   --shell-header-height: 68px;
   position: relative;
@@ -944,9 +946,9 @@ onBeforeUnmount(() => {
   min-height: 100vh;
   overflow-x: clip;
   background:
-    linear-gradient(112deg, rgba(25, 52, 95, 0.18), transparent 32%),
-    linear-gradient(248deg, rgba(82, 42, 126, 0.14), transparent 34%),
-    linear-gradient(180deg, var(--space-top), var(--surface-page) 44%, var(--space-bottom));
+    radial-gradient(ellipse at 8% -12%, rgba(23, 111, 137, 0.1), transparent 34%),
+    radial-gradient(ellipse at 92% 6%, rgba(109, 98, 160, 0.08), transparent 30%),
+    linear-gradient(180deg, #f9fcfd 0%, var(--surface-page) 48%, #edf5f6 100%);
 }
 
 .med-app::before,
@@ -960,21 +962,21 @@ onBeforeUnmount(() => {
 
 .med-app::before {
   background-image:
-    radial-gradient(circle, rgba(169, 225, 255, 0.65) 0 1px, transparent 1.35px),
-    radial-gradient(circle, rgba(197, 160, 255, 0.52) 0 0.8px, transparent 1.2px),
-    radial-gradient(circle, rgba(255, 215, 146, 0.36) 0 0.7px, transparent 1.15px);
+    radial-gradient(circle, rgba(23, 111, 137, 0.16) 0 1px, transparent 1.35px),
+    radial-gradient(circle, rgba(109, 98, 160, 0.12) 0 0.8px, transparent 1.2px),
+    radial-gradient(circle, rgba(168, 101, 24, 0.1) 0 0.7px, transparent 1.15px);
   background-position: 12px 18px, 38px 46px, 74px 9px;
   background-size: 74px 74px, 109px 109px, 137px 137px;
-  opacity: 0.46;
+  opacity: 0.7;
 }
 
 .med-app::after {
   background-image:
-    repeating-radial-gradient(ellipse at 84% 18%, transparent 0 86px, rgba(91, 196, 255, 0.09) 87px, transparent 88px 132px),
-    linear-gradient(118deg, transparent 0 18%, rgba(73, 194, 255, 0.1) 18.08%, transparent 18.28% 57%, rgba(183, 123, 255, 0.09) 57.08%, transparent 57.28%),
-    linear-gradient(63deg, transparent 0 37%, rgba(86, 229, 219, 0.08) 37.08%, transparent 37.25% 72%, rgba(246, 193, 107, 0.07) 72.08%, transparent 72.25%);
+    repeating-radial-gradient(ellipse at 86% 14%, transparent 0 104px, rgba(23, 111, 137, 0.045) 105px, transparent 107px 156px),
+    linear-gradient(118deg, transparent 0 18%, rgba(23, 111, 137, 0.045) 18.08%, transparent 18.28% 57%, rgba(109, 98, 160, 0.04) 57.08%, transparent 57.28%),
+    linear-gradient(63deg, transparent 0 37%, rgba(24, 125, 109, 0.04) 37.08%, transparent 37.25% 72%, rgba(168, 101, 24, 0.035) 72.08%, transparent 72.25%);
   mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
-  opacity: 0.82;
+  opacity: 0.9;
 }
 
 .med-header,
@@ -987,10 +989,10 @@ onBeforeUnmount(() => {
   height: var(--shell-header-height);
   padding: 0 clamp(18px, 2.5vw, 34px);
   overflow: visible;
-  background: linear-gradient(180deg, rgba(4, 9, 25, 0.9), rgba(7, 16, 38, 0.58));
-  border: 0;
-  box-shadow: inset 0 -1px 0 rgba(137, 205, 255, 0.1), 0 12px 32px rgba(1, 4, 14, 0.16);
-  backdrop-filter: blur(18px) saturate(132%);
+  background: color-mix(in srgb, var(--surface-elevated) 94%, transparent);
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 24px rgba(31, 62, 70, 0.06);
+  backdrop-filter: blur(18px) saturate(112%);
 }
 
 .med-header::before {
@@ -1000,15 +1002,15 @@ onBeforeUnmount(() => {
   left: 32%;
   height: 1px;
   content: '';
-  background: linear-gradient(90deg, transparent, rgba(93, 201, 255, 0.46), rgba(183, 130, 255, 0.42), transparent);
+  background: linear-gradient(90deg, transparent, rgba(23, 111, 137, 0.2), rgba(109, 98, 160, 0.16), transparent);
 }
 
 .med-header::after {
   right: 6%;
   bottom: 0;
   width: 18%;
-  background: linear-gradient(90deg, transparent, var(--stream-cyan), var(--stream-violet), transparent);
-  filter: drop-shadow(0 0 5px rgba(82, 190, 255, 0.55));
+  background: linear-gradient(90deg, transparent, var(--primary), var(--accent-violet), transparent);
+  filter: drop-shadow(0 0 5px rgba(23, 111, 137, 0.24));
 }
 
 .brand-link {
@@ -1018,20 +1020,17 @@ onBeforeUnmount(() => {
 .brand-symbol {
   width: 40px;
   height: 40px;
-  color: #eaf8ff;
-  background:
-    linear-gradient(145deg, rgba(105, 202, 255, 0.42), rgba(75, 102, 210, 0.22) 55%, rgba(188, 114, 255, 0.3)),
-    rgba(12, 28, 61, 0.72);
+  color: var(--text-inverse);
+  background: linear-gradient(145deg, var(--primary-solid), var(--primary), var(--success));
   border: 0;
   border-radius: 8px;
-  box-shadow: inset 0 1px 0 rgba(222, 247, 255, 0.36), 0 0 18px rgba(62, 173, 255, 0.26);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 7px 18px var(--focus-ring);
 }
 
 .brand-copy strong {
   color: var(--text-primary);
   font-size: 17px;
-  text-shadow: 0 0 18px rgba(116, 200, 255, 0.22);
+  text-shadow: none;
 }
 
 .brand-copy small {
@@ -1053,7 +1052,7 @@ onBeforeUnmount(() => {
 .header-action:hover,
 .user-trigger:hover {
   color: var(--text-primary);
-  background: rgba(113, 184, 255, 0.1);
+  background: var(--surface-muted);
 }
 
 .user-trigger {
@@ -1062,9 +1061,9 @@ onBeforeUnmount(() => {
 }
 
 .user-avatar {
-  background: linear-gradient(145deg, #4d9ff4, #4f6fd0 62%, #9b6bd5);
+  background: linear-gradient(145deg, #4a9fe8, #5b6fc6 62%, #8e6bc4);
   color: #f7fbff;
-  box-shadow: 0 0 14px rgba(78, 160, 244, 0.3);
+  box-shadow: 0 0 14px rgba(78, 160, 244, 0.2);
 }
 
 .med-body {
@@ -1085,15 +1084,15 @@ onBeforeUnmount(() => {
   place-items: center;
   flex: 0 0 auto;
   border-radius: 7px;
-  background: rgba(125, 178, 232, 0.08);
+  background: var(--surface-muted);
   color: inherit;
-  box-shadow: inset 0 1px 0 rgba(220, 244, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .med-sidebar .side-link.active .side-icon-shell {
-  color: #bcecff;
-  background: linear-gradient(145deg, rgba(66, 185, 255, 0.24), rgba(134, 92, 227, 0.18));
-  box-shadow: inset 0 1px 0 rgba(222, 246, 255, 0.3), 0 0 16px rgba(66, 177, 255, 0.22);
+  color: var(--primary);
+  background: linear-gradient(145deg, var(--primary-light), var(--accent-violet-soft));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 5px 14px rgba(23, 111, 137, 0.08);
 }
 
 .side-link-label {
@@ -1216,6 +1215,7 @@ onBeforeUnmount(() => {
 
 .workspace-admin {
   --admin-sidebar-width: 216px;
+  background: var(--surface-page);
 }
 
 .workspace-admin.admin-sidebar-collapsed {
@@ -1360,6 +1360,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex: 1;
   padding: 24px clamp(22px, 3vw, 42px) 48px;
+  background: var(--surface-page);
 }
 
 @media (max-width: 1180px) and (min-width: 901px) {

@@ -11,12 +11,14 @@ import * as echarts from 'echarts/core'
 import {
   ArrowRight,
   ChatDotRound,
+  Clock,
   Collection,
   Document,
   FirstAidKit,
   RefreshRight,
   WarningFilled,
 } from '@element-plus/icons-vue'
+import { formatAverageDuration } from '../lib/monitorMetrics'
 
 use([LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -25,6 +27,9 @@ const auth = useAuthStore()
 const records = ref([])
 const knowledgeStats = ref(null)
 const knowledgeStatsUnavailable = ref(false)
+const monitorStats = ref(null)
+const monitorStatsUnavailable = ref(false)
+const recordTotal = ref(0)
 const loading = ref(true)
 const loadError = ref('')
 const trendChartElement = ref(null)
@@ -92,10 +97,12 @@ const departmentCount = computed(() => new Set(
     .filter(Boolean),
 ).size)
 
+const averageDuration = computed(() => formatAverageDuration(monitorStats.value?.averageDurationMs))
+
 const metrics = computed(() => [
   {
     label: '问诊总量',
-    value: records.value.length,
+    value: recordTotal.value,
     suffix: '次',
     detail: `本月新增 ${thisMonthCount.value} 次`,
     icon: ChatDotRound,
@@ -120,12 +127,16 @@ const metrics = computed(() => [
     tone: 'purple',
   },
   {
-    label: '高风险提醒',
-    value: highRiskCount.value,
-    suffix: '次',
-    detail: highRiskCount.value ? '建议重点关注' : '当前无高风险记录',
-    icon: WarningFilled,
-    tone: 'orange',
+    label: '平均响应时间',
+    value: monitorStatsUnavailable.value ? '--' : averageDuration.value.value,
+    suffix: monitorStatsUnavailable.value ? '' : averageDuration.value.suffix,
+    detail: monitorStatsUnavailable.value
+      ? '监控统计暂不可用'
+      : monitorStats.value?.completedTraces
+        ? `${monitorStats.value.completedTraces} 条完成链路`
+        : '暂无已完成链路',
+    icon: Clock,
+    tone: 'gold',
   },
 ])
 
@@ -133,17 +144,24 @@ async function fetchDashboard() {
   loading.value = true
   loadError.value = ''
   try {
-    const [recordResponse, knowledgeResponse] = await Promise.all([
-      client.get('/records'),
+    const [recordResponse, knowledgeResponse, monitorResponse] = await Promise.all([
+      client.get('/records', { params: { page: 0, size: 100 } }),
       client.get('/knowledge/stats').catch(() => null),
+      client.get('/monitor/stats').catch(() => null),
     ])
     records.value = recordResponse.data?.data || []
+    recordTotal.value = Number(recordResponse.data?.meta?.total) || records.value.length
     knowledgeStatsUnavailable.value = knowledgeResponse === null
     knowledgeStats.value = knowledgeResponse?.data?.data || null
+    monitorStatsUnavailable.value = monitorResponse === null
+    monitorStats.value = monitorResponse?.data?.data || null
   } catch (error) {
     records.value = []
     knowledgeStats.value = null
     knowledgeStatsUnavailable.value = true
+    monitorStats.value = null
+    monitorStatsUnavailable.value = true
+    recordTotal.value = 0
     loadError.value = '暂时无法加载工作台数据，请稍后刷新。'
   } finally {
     loading.value = false
@@ -776,7 +794,7 @@ onBeforeUnmount(() => {
   --metric-soft: var(--accent-violet-soft);
 }
 
-.dashboard-metric.orange {
+.dashboard-metric.gold {
   --metric-tone: var(--warning);
   --metric-soft: var(--warning-soft);
 }
@@ -828,8 +846,8 @@ onBeforeUnmount(() => {
   color: var(--metric-tone);
 }
 
-.dashboard-metric.orange .dashboard-metric-icon {
-  animation: dashboard-status-glow 2.4s ease-in-out infinite;
+.dashboard-metric.gold .dashboard-metric-icon {
+  animation: none;
 }
 
 .dashboard-charts {
@@ -1179,7 +1197,7 @@ onBeforeUnmount(() => {
 
   .trend-panel::before,
   .dashboard-metric::after,
-  .dashboard-metric.orange .dashboard-metric-icon {
+  .dashboard-metric.gold .dashboard-metric-icon {
     animation: none;
   }
 
@@ -1486,7 +1504,7 @@ onBeforeUnmount(() => {
   transform: translateY(-4px);
 }
 
-.dashboard-metric.orange {
+.dashboard-metric.gold {
   --metric-tone: var(--dashboard-gold);
   --metric-haze: rgba(170, 107, 37, 0.2);
   transform: translateY(12px);
@@ -1535,7 +1553,7 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(10px);
 }
 
-.dashboard-metric.orange .dashboard-metric-icon {
+.dashboard-metric.gold .dashboard-metric-icon {
   animation: none;
 }
 
@@ -1783,9 +1801,9 @@ onBeforeUnmount(() => {
     transform: translateY(-8px);
   }
 
-  .dashboard-metric.orange:hover {
-    transform: translateY(8px);
-  }
+.dashboard-metric.gold:hover {
+  transform: translateY(8px);
+}
 
   .dashboard-panel:hover {
     border-color: transparent;
@@ -1839,7 +1857,7 @@ onBeforeUnmount(() => {
   .dashboard-metric,
   .dashboard-metric.green,
   .dashboard-metric.purple,
-  .dashboard-metric.orange {
+  .dashboard-metric.gold {
     transform: none;
   }
 
@@ -1903,7 +1921,7 @@ onBeforeUnmount(() => {
   .dashboard-metric,
   .dashboard-metric.green,
   .dashboard-metric.purple,
-  .dashboard-metric.orange {
+  .dashboard-metric.gold {
     min-height: 108px;
     padding: 18px 18px 17px 26px;
     transform: none;
@@ -1954,7 +1972,7 @@ onBeforeUnmount(() => {
   .dashboard-metric,
   .dashboard-metric.green,
   .dashboard-metric.purple,
-  .dashboard-metric.orange {
+  .dashboard-metric.gold {
     padding: 17px 14px 16px 24px;
   }
 
@@ -1984,7 +2002,7 @@ onBeforeUnmount(() => {
   .dashboard-metric:hover,
   .dashboard-metric.green:hover,
   .dashboard-metric.purple:hover,
-  .dashboard-metric.orange:hover {
+  .dashboard-metric.gold:hover {
     transform: none;
   }
 }
@@ -1998,6 +2016,293 @@ onBeforeUnmount(() => {
     left: auto;
     width: 54px;
     margin: -4px 10px 10px auto;
+  }
+}
+
+/* Light clinical data field: keeps the dashboard expressive without separating it from patient services. */
+.dashboard-page {
+  --dashboard-ink: var(--text-primary);
+  --dashboard-secondary: var(--text-secondary);
+  --dashboard-muted: var(--text-muted);
+  --dashboard-blue: var(--primary);
+  --dashboard-cyan: var(--success);
+  --dashboard-violet: var(--accent-violet);
+  --dashboard-gold: var(--warning);
+  --dashboard-red: var(--danger);
+
+  position: relative;
+  width: min(100%, 1260px);
+  padding: 8px 0 52px;
+  isolation: isolate;
+  overflow: hidden;
+  background: transparent;
+}
+
+.dashboard-page::before {
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 14% 18%, rgba(23, 111, 137, 0.11), transparent 34%),
+    radial-gradient(ellipse at 86% 80%, rgba(109, 98, 160, 0.08), transparent 32%),
+    linear-gradient(145deg, #f8fcfd 0%, #f2f8f9 55%, #f7f8fc 100%);
+}
+
+.dashboard-page > :not(.dashboard-atmosphere) {
+  position: relative;
+  z-index: 1;
+}
+
+.dashboard-atmosphere {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(23, 111, 137, 0.05), transparent 40%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 56%);
+  pointer-events: none;
+}
+
+.dashboard-atmosphere::before {
+  background-image:
+    radial-gradient(circle, rgba(23, 111, 137, 0.28) 0 1px, transparent 1.45px),
+    radial-gradient(circle, rgba(109, 98, 160, 0.2) 0 1px, transparent 1.4px);
+  background-position: 0 0, 31px 19px;
+  background-size: 67px 67px, 109px 109px;
+  opacity: 0.42;
+}
+
+.dashboard-atmosphere::after {
+  background:
+    repeating-linear-gradient(114deg, transparent 0 98px, rgba(23, 111, 137, 0.045) 99px 100px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.28), transparent 21%, transparent 80%, rgba(255, 255, 255, 0.24));
+  opacity: 0.62;
+}
+
+.dashboard-atmosphere svg {
+  opacity: 0.38;
+}
+
+.atmosphere-filaments {
+  stroke: rgba(23, 111, 137, 0.12);
+}
+
+.atmosphere-orbits {
+  stroke: var(--primary);
+  opacity: 0.26;
+}
+
+.atmosphere-gold {
+  stroke: var(--accent-violet);
+  opacity: 0.2;
+}
+
+.atmosphere-nodes {
+  fill: var(--primary);
+  filter: none;
+}
+
+.dashboard-heading h1,
+.dashboard-panel-heading h2,
+.dashboard-metric strong {
+  color: var(--dashboard-ink);
+  text-shadow: none;
+}
+
+.dashboard-heading p,
+.dashboard-metric > div > span,
+.dashboard-metric strong small,
+.dashboard-metric p,
+.dashboard-mobile-record small,
+.dashboard-mobile-record time {
+  color: var(--dashboard-muted);
+}
+
+.dashboard-heading > .dashboard-heading-copy > .dashboard-kicker,
+.dashboard-panel-heading > div > span {
+  color: var(--dashboard-blue);
+}
+
+.dashboard-actions :deep(.el-button),
+.dashboard-panel-heading :deep(.el-button) {
+  --el-button-bg-color: var(--surface-elevated);
+  --el-button-border-color: var(--border-default);
+  --el-button-text-color: var(--text-secondary);
+  --el-button-hover-bg-color: var(--primary-soft);
+  --el-button-hover-border-color: var(--primary);
+  --el-button-hover-text-color: var(--primary-solid);
+  box-shadow: 0 5px 14px rgba(31, 62, 70, 0.06);
+  backdrop-filter: none;
+}
+
+.dashboard-actions :deep(.el-button--primary) {
+  --el-button-bg-color: var(--primary-solid);
+  --el-button-border-color: var(--primary-solid);
+  --el-button-text-color: var(--text-inverse);
+  --el-button-hover-bg-color: var(--primary-solid-hover);
+  --el-button-hover-border-color: var(--primary-solid-hover);
+}
+
+.dashboard-page > .el-alert {
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
+  background: var(--warning-soft);
+  color: var(--text-primary);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.dashboard-metrics {
+  gap: 14px;
+}
+
+.dashboard-metric,
+.dashboard-metric.green,
+.dashboard-metric.purple,
+.dashboard-metric.gold {
+  min-height: 132px;
+  transform: none;
+  border: 1px solid var(--border-subtle);
+  border-top: 3px solid var(--metric-tone);
+  border-radius: 8px;
+  background: linear-gradient(145deg, var(--surface-elevated), color-mix(in srgb, var(--metric-soft) 46%, white));
+  box-shadow: var(--shadow-card);
+}
+
+.dashboard-metric::before {
+  display: none;
+}
+
+.dashboard-metric::after {
+  background: linear-gradient(90deg, transparent, var(--metric-soft), var(--metric-tone), transparent);
+  filter: none;
+}
+
+.dashboard-metric-icon {
+  background: var(--metric-soft);
+  color: var(--metric-tone);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.dashboard-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: var(--shadow-card);
+}
+
+.dashboard-panel::before {
+  opacity: 0.38;
+}
+
+.dashboard-panel-heading :deep(.el-tag),
+.dashboard-page :deep(.el-tag) {
+  --el-tag-bg-color: var(--primary-soft);
+  --el-tag-border-color: transparent;
+  --el-tag-text-color: var(--primary-solid);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.dashboard-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: var(--surface-muted);
+  --el-table-row-hover-bg-color: var(--primary-soft);
+  --el-table-border-color: var(--border-subtle);
+  --el-table-text-color: var(--text-secondary);
+  --el-table-header-text-color: var(--text-muted);
+}
+
+.dashboard-table :deep(.el-table),
+.dashboard-table :deep(.el-table__inner-wrapper),
+.dashboard-table :deep(.el-table__header-wrapper),
+.dashboard-table :deep(.el-table__body-wrapper),
+.dashboard-table :deep(.el-table__row),
+.dashboard-table :deep(.el-table__cell) {
+  background: transparent;
+}
+
+.dashboard-table :deep(.el-table__row:hover > td.el-table__cell),
+.dashboard-mobile-record:hover {
+  background: var(--primary-soft);
+}
+
+.dashboard-risk-status {
+  min-height: 58px;
+  margin: 2px 0 14px auto;
+  padding: 6px 12px 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, var(--border-subtle));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-elevated) 92%, var(--danger-soft));
+  box-shadow: 0 7px 18px rgba(31, 62, 70, 0.07);
+}
+
+.risk-orb-core {
+  width: 46px;
+  height: 46px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
+  animation: none;
+}
+
+.risk-orb-core::before,
+.risk-orb-core::after {
+  display: none;
+}
+
+.risk-orb-core .el-icon {
+  margin-top: -9px;
+  filter: none;
+}
+
+.risk-orb-core strong {
+  margin-bottom: 6px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.risk-orb-highlight {
+  display: none;
+}
+
+.risk-orb-copy {
+  display: block;
+  margin-left: 2px;
+}
+
+.risk-orb-copy strong,
+.risk-orb-copy small {
+  text-shadow: none;
+}
+
+.risk-orb-copy strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.risk-orb-copy small {
+  color: var(--text-muted);
+}
+
+@media (hover: hover) {
+  .dashboard-metric:hover,
+  .dashboard-metric.green:hover,
+  .dashboard-metric.purple:hover,
+  .dashboard-metric.gold:hover {
+    transform: translateY(-2px);
+    filter: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-page {
+    padding: 4px 0 40px;
+  }
+
+  .dashboard-risk-status {
+    width: max-content;
+    margin: -2px 0 12px auto;
   }
 }
 </style>

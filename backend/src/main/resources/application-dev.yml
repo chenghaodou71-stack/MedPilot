@@ -5,9 +5,17 @@ spring:
     password: ${DB_PASSWORD:123456}
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
 
 medpilot:
+  redis:
+    enabled: false
+    required: false
+  identity:
+    local-password-login-enabled: true
+    oidc:
+      enabled: false
+      allow-insecure-http: true
   ai-service-token: ${MEDPILOT_AI_SERVICE_TOKEN:medpilot-dev-service-token}
   data-encryption-key: ${MEDPILOT_DATA_ENCRYPTION_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
   jwt:

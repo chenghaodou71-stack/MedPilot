@@ -25,6 +25,17 @@ async def test_extract_parses_structured_fields():
 
 
 @pytest.mark.unit
+async def test_extract_normalizes_aliases_and_deduplicates_symptoms():
+    fake = _fake_chat(
+        '{"symptoms":["心慌","心悸","胸口疼"],"duration":"今天"}'
+    )
+
+    result = await extract("我心慌，胸口疼", chat_fn=fake)
+
+    assert result.symptoms == ("心悸", "胸痛")
+
+
+@pytest.mark.unit
 async def test_extract_detects_red_flags_from_raw_text():
     fake = _fake_chat('{"symptoms":["胸痛"]}')
     result = await extract("我突然胸痛还呼吸困难", chat_fn=fake)

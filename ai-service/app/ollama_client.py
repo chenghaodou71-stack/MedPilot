@@ -1,4 +1,6 @@
 """Ollama 本地模型客户端封装。仅在系统边界处做输入校验。"""
+import asyncio
+import json
 import os
 import httpx
 
@@ -20,13 +22,40 @@ async def chat(prompt: str, system: str | None = None) -> str:
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-        resp = await client.post(
-            f"{OLLAMA_BASE}/api/chat",
-            json={"model": CHAT_MODEL, "messages": messages, "stream": False},
-        )
-        resp.raise_for_status()
-        return resp.json()["message"]["content"]
+    chunks: list[str] = []
+    completed = False
+    try:
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            async with client.stream(
+                "POST",
+                f"{OLLAMA_BASE}/api/chat",
+                json={"model": CHAT_MODEL, "messages": messages, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    if not isinstance(payload, dict) or payload.get("error"):
+                        raise ValueError("invalid Ollama stream envelope")
+                    message = payload.get("message")
+                    if not isinstance(message, dict):
+                        raise ValueError("missing Ollama stream message")
+                    content = message.get("content")
+                    if not isinstance(content, str):
+                        raise ValueError("invalid Ollama stream content")
+                    if content:
+                        chunks.append(content)
+                    if payload.get("done") is True:
+                        completed = True
+                        break
+        if not completed or not chunks:
+            raise ValueError("incomplete Ollama chat stream")
+        return "".join(chunks)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        raise RuntimeError("Ollama chat stream failed") from exc
 
 
 async def embed(text: str) -> list[float]:

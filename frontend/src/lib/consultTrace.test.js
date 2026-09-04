@@ -149,4 +149,128 @@ describe('reduceConsultTraceEvent', () => {
     expect(state.citations).toEqual([citation])
     expect(state.citations[0].quote).toBe('咳嗽伴发热应评估。')
   })
+
+  it('withholds the validated compose answer and reveals only received deltas', () => {
+    const answer = {
+      text: '建议尽快到呼吸内科就诊。',
+      citations: [],
+      safety_boundary: '症状加重时及时急诊。',
+    }
+    let state = createConsultTraceState()
+    state = reduceConsultTraceEvent(state, event(1, {
+      node: 'compose',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+    }))
+    state = reduceConsultTraceEvent(state, event(2, {
+      node: 'compose',
+      status: 'completed',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { answer },
+    }))
+
+    expect(state.expectedAnswer).toEqual(answer)
+    expect(state.answer).toBeNull()
+    expect(state.streamedAnswerText).toBe('')
+
+    state = reduceConsultTraceEvent(state, event(3, {
+      type: 'answer_delta',
+      node: undefined,
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { delta: '建议尽快到' },
+    }))
+    expect(state.streamedAnswerText).toBe('建议尽快到')
+    expect(state.answer).toBeNull()
+
+    state = reduceConsultTraceEvent(state, event(4, {
+      type: 'answer_delta',
+      node: undefined,
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { delta: '呼吸内科就诊。' },
+    }))
+    state = reduceConsultTraceEvent(state, event(5, {
+      type: 'done',
+      node: undefined,
+      status: 'completed',
+      state: { intent: 'medical_consult', phase: 'completed', turn_count: 1, history_mode: 'full' },
+      data: { answer },
+    }))
+
+    expect(state.status).toBe('done')
+    expect(state.streamedAnswerText).toBe(answer.text)
+    expect(state.answer).toEqual(answer)
+  })
+
+  it.each([
+    ['wrong status', { status: 'completed', data: { delta: '建议' } }],
+    ['wrong phase', {
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'completed', turn_count: 1, history_mode: 'full' },
+      data: { delta: '建议' },
+    }],
+    ['empty delta', { status: 'streaming', data: { delta: '' } }],
+    ['blank delta', { status: 'streaming', data: { delta: '   ' } }],
+    ['extra data', { status: 'streaming', data: { delta: '建议', answer: '伪造全文' } }],
+  ])('rejects an answer_delta with %s', (_label, overrides) => {
+    const answer = { text: '建议就诊。', citations: [] }
+    let state = createConsultTraceState()
+    state = reduceConsultTraceEvent(state, event(1, {
+      node: 'compose',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+    }))
+    state = reduceConsultTraceEvent(state, event(2, {
+      node: 'compose',
+      status: 'completed',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { answer },
+    }))
+
+    expect(() => reduceConsultTraceEvent(state, event(3, {
+      type: 'answer_delta',
+      node: undefined,
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { delta: '建议' },
+      ...overrides,
+    }))).toThrow(ConsultTraceProtocolError)
+  })
+
+  it('rejects a delta that diverges from compose and an incomplete stream at done', () => {
+    const answer = { text: '建议就诊。', citations: [] }
+    let state = createConsultTraceState()
+    state = reduceConsultTraceEvent(state, event(1, {
+      node: 'compose',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+    }))
+    state = reduceConsultTraceEvent(state, event(2, {
+      node: 'compose',
+      status: 'completed',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { answer },
+    }))
+
+    expect(() => reduceConsultTraceEvent(state, event(3, {
+      type: 'answer_delta',
+      node: undefined,
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { delta: '无需' },
+    }))).toThrow(ConsultTraceProtocolError)
+
+    state = reduceConsultTraceEvent(state, event(3, {
+      type: 'answer_delta',
+      node: undefined,
+      status: 'streaming',
+      state: { intent: 'medical_consult', phase: 'composing', turn_count: 1, history_mode: 'full' },
+      data: { delta: '建议' },
+    }))
+    expect(() => reduceConsultTraceEvent(state, event(4, {
+      type: 'done',
+      node: undefined,
+      status: 'completed',
+      state: { intent: 'medical_consult', phase: 'completed', turn_count: 1, history_mode: 'full' },
+      data: { answer },
+    }))).toThrow(ConsultTraceProtocolError)
+  })
 })

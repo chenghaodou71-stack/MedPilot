@@ -67,9 +67,17 @@ public class ConsultationAttachmentController {
     }
 
     @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable String id, Authentication authentication) {
-        service.delete(userId(authentication), id);
+    public org.springframework.http.ResponseEntity<ApiResponse<Void>> delete(
+            @PathVariable String id,
+            Authentication authentication) {
+        try {
+            service.delete(userId(authentication), id);
+            return org.springframework.http.ResponseEntity.noContent().build();
+        } catch (AttachmentStorageException exception) {
+            return org.springframework.http.ResponseEntity
+                    .status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.fail("附件文件删除失败，元数据已保留"));
+        }
     }
 
     private Long userId(Authentication authentication) {

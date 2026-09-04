@@ -1,6 +1,8 @@
 package com.medpilot.attachment;
 
 import com.medpilot.consult.SessionOwnershipService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +15,8 @@ import java.util.List;
 public class ConsultationAttachmentService {
 
     private static final int MAX_DRAFT_CHARS = 4000;
+    private static final Logger log = LoggerFactory.getLogger(
+            ConsultationAttachmentService.class);
 
     private final ConsultationAttachmentRepository repository;
     private final ConsultationAttachmentStorage storage;
@@ -42,7 +46,11 @@ public class ConsultationAttachmentService {
             return repository.save(new ConsultationAttachment(
                     userId, canonicalSession, stored, draft, retentionDays));
         } catch (RuntimeException exception) {
-            storage.delete(stored.storageKey());
+            try {
+                storage.delete(stored.storageKey());
+            } catch (RuntimeException cleanupFailure) {
+                exception.addSuppressed(cleanupFailure);
+            }
             throw exception;
         }
     }
@@ -64,7 +72,13 @@ public class ConsultationAttachmentService {
     @Transactional
     public void delete(Long userId, String attachmentId) {
         ConsultationAttachment attachment = own(userId, attachmentId);
-        storage.delete(attachment.getStorageKey());
+        try {
+            storage.delete(attachment.getStorageKey());
+        } catch (AttachmentStorageException exception) {
+            log.error("attachment_delete_failed attachment_id={} storage_key={} reason={}",
+                    attachment.getId(), attachment.getStorageKey(), exception.getMessage());
+            throw exception;
+        }
         repository.delete(attachment);
     }
 
@@ -72,7 +86,13 @@ public class ConsultationAttachmentService {
     public int purgeExpired(Instant now) {
         List<ConsultationAttachment> expired = repository.findByExpiresAtBefore(now);
         for (ConsultationAttachment attachment : expired) {
-            storage.delete(attachment.getStorageKey());
+            try {
+                storage.delete(attachment.getStorageKey());
+            } catch (AttachmentStorageException exception) {
+                log.error("attachment_retention_delete_failed attachment_id={} storage_key={} reason={}",
+                        attachment.getId(), attachment.getStorageKey(), exception.getMessage());
+                throw exception;
+            }
             repository.delete(attachment);
         }
         return expired.size();

@@ -1,17 +1,18 @@
 <script setup>
-import { defineAsyncComponent, onMounted, ref } from 'vue'
+import { defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BrainCircuit,
-  Check,
-  Database,
   Eye,
   EyeOff,
   LoaderCircle,
   LockKeyhole,
   LogIn,
   Network,
+  ShieldCheck,
+  UserPlus,
   UserRound,
+  X,
 } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { resolvePostLoginTarget } from '../lib/navigation'
@@ -25,7 +26,8 @@ const MedicalNetworkScene = defineAsyncComponent({
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
-const accessOpen = ref(false)
+
+const modalMode = ref('')
 const username = ref('')
 const password = ref('')
 const passwordVisible = ref(false)
@@ -33,21 +35,33 @@ const rememberUsername = ref(true)
 const error = ref('')
 const loading = ref(false)
 const usernameInput = ref(null)
-const passwordInput = ref(null)
+const modalCloseButton = ref(null)
 
 function clearError() {
   if (error.value) error.value = ''
 }
 
-function toggleAccessChain() {
+function openModal(mode) {
   if (loading.value) return
-  accessOpen.value = !accessOpen.value
+  modalMode.value = mode
   error.value = ''
+  passwordVisible.value = false
+}
+
+function closeModal() {
+  if (loading.value) return
+  modalMode.value = ''
+  error.value = ''
+  password.value = ''
+  passwordVisible.value = false
+}
+
+function handleBackdropClick(event) {
+  if (event.target === event.currentTarget) closeModal()
 }
 
 function togglePasswordVisibility() {
   passwordVisible.value = !passwordVisible.value
-  requestAnimationFrame(() => passwordInput.value?.focus())
 }
 
 function persistRememberedUsername(value) {
@@ -59,17 +73,15 @@ function persistRememberedUsername(value) {
   }
 }
 
-async function submit() {
+async function submitLogin() {
   if (loading.value) return
 
   error.value = ''
   const normalizedUsername = username.value.trim()
   if (!normalizedUsername || !password.value) {
     error.value = '请输入账号和密码。'
-    requestAnimationFrame(() => {
-      if (!normalizedUsername) usernameInput.value?.focus()
-      else passwordInput.value?.focus()
-    })
+    await nextTick()
+    if (!normalizedUsername) usernameInput.value?.focus()
     return
   }
 
@@ -85,6 +97,13 @@ async function submit() {
   }
 }
 
+watch(modalMode, async (mode) => {
+  if (!mode) return
+  await nextTick()
+  if (mode === 'login') usernameInput.value?.focus()
+  else modalCloseButton.value?.focus()
+})
+
 onMounted(() => {
   try {
     username.value = localStorage.getItem('rememberedUsername') || ''
@@ -95,7 +114,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="login-page" :class="{ 'is-access-open': accessOpen }">
+  <main class="login-page">
     <div class="login-scene-layer" aria-hidden="true">
       <MedicalNetworkScene class="login-network-scene" />
     </div>
@@ -104,149 +123,179 @@ onMounted(() => {
     <div class="login-scanline" aria-hidden="true" />
 
     <section class="login-workspace" aria-labelledby="login-title">
+      <header class="login-topbar">
+        <div class="login-action-bar" aria-label="账号操作">
+          <button
+            class="login-action login-action-signup"
+            type="button"
+            :disabled="loading"
+            @click="openModal('register')"
+          >
+            <UserPlus :size="22" :stroke-width="2" aria-hidden="true" />
+            <span>注册</span>
+          </button>
+          <button
+            class="login-action login-action-login"
+            type="button"
+            :disabled="loading"
+            @click="openModal('login')"
+          >
+            <LogIn :size="22" :stroke-width="2" aria-hidden="true" />
+            <span>登录</span>
+          </button>
+        </div>
+      </header>
+
       <div class="login-visual-copy">
         <span class="login-kicker">MULTI-AGENT TRIAGE SYSTEM / 04</span>
         <h1 id="login-title">多智能体协同<br /><strong>辅助分诊</strong></h1>
         <p>融合本地大语言模型与医学知识库，构建可信、可追溯的辅助分诊工作流。</p>
 
         <div class="login-capabilities" aria-label="系统能力">
-          <span><Database :size="14" aria-hidden="true" />信息采集</span>
+          <span><Network :size="14" aria-hidden="true" />多智能体协同</span>
           <span><BrainCircuit :size="14" aria-hidden="true" />知识检索</span>
-          <span><Network :size="14" aria-hidden="true" />辅助分诊</span>
+          <span><ShieldCheck :size="14" aria-hidden="true" />安全可追溯</span>
         </div>
       </div>
-
-      <div class="login-access-chain">
-        <svg
-          v-if="accessOpen"
-          class="login-chain-rail is-desktop"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <polyline class="rail-shadow" points="29,89 42,75 60,54 80,32" />
-          <polyline class="rail-core" points="29,89 42,75 60,54 80,32" />
-          <circle cx="42" cy="75" r="0.65" />
-          <circle cx="60" cy="54" r="0.65" />
-          <circle cx="80" cy="32" r="0.65" />
-        </svg>
-
-        <svg
-          v-if="accessOpen"
-          class="login-chain-rail is-mobile"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <polyline class="rail-shadow" points="13,91 21,82 36,69 87,56" />
-          <polyline class="rail-core" points="13,91 21,82 36,69 87,56" />
-          <circle cx="21" cy="82" r="0.8" />
-          <circle cx="36" cy="69" r="0.8" />
-          <circle cx="87" cy="56" r="0.8" />
-        </svg>
-
-        <button
-          class="login-nexus-trigger"
-          type="button"
-          :aria-expanded="accessOpen"
-          aria-controls="login-chain-form"
-          :aria-label="accessOpen ? '收起登录通道' : '展开登录通道'"
-          :title="accessOpen ? '收起登录通道' : '展开登录通道'"
-          :disabled="loading"
-          @click="toggleAccessChain"
-        >
-          <span class="login-nexus-radar" aria-hidden="true" />
-          <Network :size="23" :stroke-width="1.65" aria-hidden="true" />
-          <small aria-hidden="true">登录</small>
-        </button>
-
-        <form
-          v-if="accessOpen"
-          id="login-chain-form"
-          class="login-chain-form"
-          aria-label="登录凭据"
-          :aria-busy="loading"
-          @submit.prevent="submit"
-        >
-          <h2 class="login-sr-only">登录工作台</h2>
-
-          <div class="login-entry login-account-entry" data-entry="account">
-            <label class="login-sr-only" for="login-username">账号</label>
-            <UserRound class="login-entry-icon" :size="19" :stroke-width="1.7" aria-hidden="true" />
-            <input
-              id="login-username"
-              ref="usernameInput"
-              v-model="username"
-              class="login-entry-input"
-              name="username"
-              autocomplete="username"
-              placeholder="输入系统账号"
-              :disabled="loading"
-              @input="clearError"
-            />
-            <label class="login-remember-control" title="记住账号">
-              <input v-model="rememberUsername" type="checkbox" :disabled="loading" aria-label="记住账号" />
-              <Check :size="10" :stroke-width="2.4" aria-hidden="true" />
-              <span>记住</span>
-            </label>
-          </div>
-
-          <div class="login-entry login-password-entry" data-entry="password">
-            <label class="login-sr-only" for="login-password">密码</label>
-            <LockKeyhole class="login-entry-icon" :size="18" :stroke-width="1.7" aria-hidden="true" />
-            <input
-              id="login-password"
-              ref="passwordInput"
-              v-model="password"
-              class="login-entry-input"
-              name="password"
-              :type="passwordVisible ? 'text' : 'password'"
-              autocomplete="current-password"
-              placeholder="输入访问密码"
-              :disabled="loading"
-              @input="clearError"
-            />
-            <button
-              class="login-password-toggle"
-              type="button"
-              :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
-              :title="passwordVisible ? '隐藏密码' : '显示密码'"
-              :disabled="loading"
-              @click="togglePasswordVisibility"
-            >
-              <EyeOff v-if="passwordVisible" :size="16" aria-hidden="true" />
-              <Eye v-else :size="16" aria-hidden="true" />
-            </button>
-          </div>
-
-          <button
-            class="login-submit-orb"
-            type="submit"
-            aria-label="登录"
-            title="登录"
-            :disabled="loading"
-          >
-            <LoaderCircle v-if="loading" class="login-loading-icon" :size="20" aria-hidden="true" />
-            <LogIn v-else :size="20" :stroke-width="1.8" aria-hidden="true" />
-            <span>{{ loading ? '验证' : '登录' }}</span>
-          </button>
-        </form>
-
-        <Transition name="login-status">
-          <p
-            v-if="error || loading"
-            class="login-chain-status"
-            :class="{ 'is-error': error, 'is-loading': loading && !error }"
-            :role="error ? 'alert' : 'status'"
-            :title="error || '正在验证访问凭据'"
-          >
-            <i aria-hidden="true" />
-            <span>{{ error || '正在验证访问凭据' }}</span>
-          </p>
-        </Transition>
-      </div>
-
     </section>
+
+    <Transition name="login-modal">
+      <div
+        v-if="modalMode"
+        class="login-modal-backdrop"
+        role="presentation"
+        @click="handleBackdropClick"
+      >
+        <section
+          v-if="modalMode === 'login'"
+          class="login-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="login-dialog-title"
+          aria-describedby="login-dialog-description"
+          @keydown.esc="closeModal"
+        >
+          <button
+            ref="modalCloseButton"
+            class="login-modal-close"
+            type="button"
+            aria-label="关闭登录弹窗"
+            title="关闭"
+            :disabled="loading"
+            @click="closeModal"
+          >
+            <X :size="18" aria-hidden="true" />
+          </button>
+
+          <div class="login-modal-icon login-modal-icon-login" aria-hidden="true">
+            <LogIn :size="22" :stroke-width="2" />
+          </div>
+          <span class="login-modal-eyebrow">MEDPILOT ACCESS</span>
+          <h2 id="login-dialog-title">登录系统</h2>
+          <p id="login-dialog-description" class="login-modal-description">
+            使用已开通的系统账号进入辅助分诊工作台。
+          </p>
+
+          <form class="login-form" aria-label="登录表单" :aria-busy="loading" @submit.prevent="submitLogin">
+            <label class="login-field" for="login-username">
+              <span>账号</span>
+              <span class="login-field-control">
+                <UserRound :size="17" aria-hidden="true" />
+                <input
+                  id="login-username"
+                  ref="usernameInput"
+                  v-model="username"
+                  name="username"
+                  autocomplete="username"
+                  placeholder="请输入账号"
+                  :disabled="loading"
+                  @input="clearError"
+                />
+              </span>
+            </label>
+
+            <label class="login-field" for="login-password">
+              <span>密码</span>
+              <span class="login-field-control">
+                <LockKeyhole :size="17" aria-hidden="true" />
+                <input
+                  id="login-password"
+                  v-model="password"
+                  name="password"
+                  :type="passwordVisible ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  placeholder="请输入密码"
+                  :disabled="loading"
+                  @input="clearError"
+                />
+                <button
+                  class="login-password-toggle"
+                  type="button"
+                  :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
+                  :title="passwordVisible ? '隐藏密码' : '显示密码'"
+                  :disabled="loading"
+                  @click="togglePasswordVisibility"
+                >
+                  <EyeOff v-if="passwordVisible" :size="17" aria-hidden="true" />
+                  <Eye v-else :size="17" aria-hidden="true" />
+                </button>
+              </span>
+            </label>
+
+            <label class="login-remember-control">
+              <input v-model="rememberUsername" type="checkbox" :disabled="loading" />
+              <span>记住账号</span>
+            </label>
+
+            <p v-if="error" class="login-form-error" role="alert">{{ error }}</p>
+
+            <button class="login-form-submit" type="submit" :disabled="loading">
+              <LoaderCircle v-if="loading" class="login-loading-icon" :size="18" aria-hidden="true" />
+              <LogIn v-else :size="18" aria-hidden="true" />
+              <span>{{ loading ? '登录中...' : '登录' }}</span>
+            </button>
+          </form>
+        </section>
+
+        <section
+          v-else
+          class="login-modal login-register-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="register-dialog-title"
+          aria-describedby="register-dialog-description"
+          @keydown.esc="closeModal"
+        >
+          <button
+            ref="modalCloseButton"
+            class="login-modal-close"
+            type="button"
+            aria-label="关闭注册弹窗"
+            title="关闭"
+            @click="closeModal"
+          >
+            <X :size="18" aria-hidden="true" />
+          </button>
+
+          <div class="login-modal-icon login-modal-icon-register" aria-hidden="true">
+            <UserPlus :size="22" :stroke-width="2" />
+          </div>
+          <span class="login-modal-eyebrow">ACCOUNT ACCESS</span>
+          <h2 id="register-dialog-title">注册账号</h2>
+          <p id="register-dialog-description" class="login-modal-description">
+            当前系统不支持自助注册，请联系管理员开通账号。
+          </p>
+          <div class="login-register-note">
+            <ShieldCheck :size="18" aria-hidden="true" />
+            <span>账号由管理员统一创建，开通后即可使用登录入口。</span>
+          </div>
+          <button class="login-form-submit login-register-back" type="button" @click="openModal('login')">
+            <LogIn :size="18" aria-hidden="true" />
+            <span>返回登录</span>
+          </button>
+        </section>
+      </div>
+    </Transition>
   </main>
 </template>
 
@@ -336,32 +385,113 @@ onMounted(() => {
   width: min(100%, 1600px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: 34px 48px 30px;
-  display: grid;
-  grid-template-rows: 1fr;
+  padding: 32px 48px 30px;
 }
 
-.login-capabilities {
+.login-topbar {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.login-action-bar {
   display: flex;
   align-items: center;
+  gap: 14px;
+  padding: 8px 10px;
+  border: 1px solid rgba(143, 170, 222, 0.32);
+  border-radius: 999px;
+  background: rgba(54, 75, 116, 0.64);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(14px) saturate(125%);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
 }
 
-.login-chain-status i {
-  width: 6px;
-  height: 6px;
+.login-action {
+  min-width: 166px;
+  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 26px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #f4f7ff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.login-action svg {
   flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--login-cyan);
-  box-shadow: 0 0 10px rgba(76, 227, 220, 0.9);
+}
+
+.login-action-signup {
+  border-color: rgba(100, 148, 208, 0.22);
+  background: rgba(8, 25, 56, 0.96);
+  box-shadow: 0 8px 16px rgba(1, 7, 18, 0.28), inset 0 1px 0 rgba(132, 188, 255, 0.08);
+}
+
+.login-action-signup svg {
+  color: #00dca2;
+  filter: drop-shadow(0 0 7px rgba(0, 220, 162, 0.28));
+}
+
+.login-action-login {
+  border-color: rgba(204, 123, 211, 0.24);
+  background: rgba(48, 20, 47, 0.96);
+  box-shadow: 0 8px 16px rgba(12, 4, 15, 0.28), inset 0 1px 0 rgba(255, 197, 251, 0.08);
+}
+
+.login-action-login svg {
+  color: #ffc400;
+  filter: drop-shadow(0 0 7px rgba(255, 196, 0, 0.3));
+}
+
+.login-action:hover,
+.login-action:focus-visible {
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.login-action-signup:hover,
+.login-action-signup:focus-visible {
+  border-color: rgba(0, 220, 162, 0.6);
+  box-shadow: 0 12px 25px rgba(0, 220, 162, 0.14), inset 0 1px 0 rgba(148, 255, 222, 0.12);
+}
+
+.login-action-login:hover,
+.login-action-login:focus-visible {
+  border-color: rgba(255, 196, 0, 0.62);
+  box-shadow: 0 12px 25px rgba(255, 196, 0, 0.12), inset 0 1px 0 rgba(255, 238, 165, 0.12);
+}
+
+.login-action:focus-visible,
+.login-modal-close:focus-visible,
+.login-password-toggle:focus-visible,
+.login-form-submit:focus-visible {
+  outline: 2px solid rgba(208, 238, 255, 0.96);
+  outline-offset: 4px;
+}
+
+.login-action:disabled,
+.login-modal-close:disabled,
+.login-password-toggle:disabled,
+.login-form-submit:disabled {
+  cursor: wait;
+  opacity: 0.64;
 }
 
 .login-visual-copy {
   position: relative;
   z-index: 4;
   width: min(46%, 540px);
-  align-self: center;
-  margin-left: 3%;
-  padding-bottom: 104px;
+  margin: 25vh 0 0 3%;
   animation: login-rise 0.85s 0.08s ease-out both;
 }
 
@@ -398,7 +528,9 @@ onMounted(() => {
 }
 
 .login-capabilities {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 9px;
   margin-top: 25px;
 }
@@ -427,458 +559,275 @@ onMounted(() => {
   color: #a9eee8;
 }
 
-.login-access-chain {
-  position: absolute;
-  z-index: 7;
+.login-modal-backdrop {
+  position: fixed;
   inset: 0;
-  pointer-events: none;
-}
-
-.login-chain-rail {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.login-chain-rail.is-mobile {
-  display: none;
-}
-
-.login-chain-rail polyline {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-}
-
-.login-chain-rail .rail-shadow {
-  stroke: rgba(56, 161, 255, 0.16);
-  stroke-width: 8;
-  filter: blur(5px);
-}
-
-.login-chain-rail .rail-core {
-  stroke: rgba(104, 205, 255, 0.72);
-  stroke-width: 1.1;
-  stroke-dasharray: 8 6;
-  animation: login-rail-draw 1.05s ease-out both, login-rail-flow 3.2s 1.05s linear infinite;
-}
-
-.login-chain-rail circle {
-  fill: #68e3dd;
-  stroke: rgba(141, 224, 255, 0.62);
-  stroke-width: 0.35;
-  vector-effect: non-scaling-stroke;
-  filter: drop-shadow(0 0 4px rgba(76, 227, 220, 0.9));
-  animation: login-node-flare 1.8s ease-in-out infinite;
-}
-
-.login-nexus-trigger,
-.login-submit-orb {
-  position: absolute;
-  z-index: 4;
+  z-index: 20;
   display: grid;
   place-items: center;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  border-radius: 50%;
-  color: #e9f7ff;
-  cursor: pointer;
-  pointer-events: auto;
-  -webkit-tap-highlight-color: transparent;
+  padding: 24px;
+  background: rgba(1, 5, 16, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.login-nexus-trigger {
-  left: 27%;
-  bottom: 7.5%;
-  width: 72px;
-  height: 72px;
-  border: 1px solid rgba(91, 204, 255, 0.72);
-  background:
-    radial-gradient(circle at 38% 34%, rgba(121, 224, 255, 0.45), transparent 27%),
-    rgba(8, 30, 61, 0.72);
-  box-shadow:
-    0 0 0 8px rgba(41, 138, 216, 0.08),
-    0 0 34px rgba(48, 170, 255, 0.42),
-    inset 0 0 22px rgba(88, 202, 255, 0.2);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.login-nexus-trigger::before,
-.login-nexus-trigger::after {
-  position: absolute;
-  pointer-events: none;
-  content: '';
-  border-radius: 50%;
-}
-
-.login-nexus-trigger::before {
-  inset: 7px;
-  border: 1px dashed rgba(120, 214, 255, 0.32);
-  animation: login-nexus-turn 9s linear infinite;
-}
-
-.login-nexus-trigger::after {
-  inset: -12px;
-  border: 1px solid rgba(76, 227, 220, 0.14);
-  animation: login-nexus-breathe 2.8s ease-in-out infinite;
-}
-
-.login-nexus-trigger:hover,
-.login-nexus-trigger:focus-visible,
-.is-access-open .login-nexus-trigger {
-  border-color: rgba(116, 229, 255, 0.94);
-  box-shadow:
-    0 0 0 9px rgba(41, 138, 216, 0.1),
-    0 0 44px rgba(49, 185, 255, 0.58),
-    inset 0 0 25px rgba(88, 225, 255, 0.24);
-}
-
-.login-nexus-trigger:focus-visible,
-.login-submit-orb:focus-visible {
-  outline: 2px solid rgba(202, 241, 255, 0.96);
-  outline-offset: 5px;
-}
-
-.login-nexus-trigger:active,
-.login-submit-orb:active {
-  transform: scale(0.96);
-}
-
-.login-nexus-trigger:disabled,
-.login-submit-orb:disabled {
-  cursor: wait;
-}
-
-.login-nexus-trigger > svg {
+.login-modal {
   position: relative;
-  z-index: 2;
-  transform: translateY(-4px);
+  width: min(100%, 430px);
+  max-height: min(680px, calc(100dvh - 48px));
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 38px 34px 32px;
+  border: 1px solid rgba(135, 183, 244, 0.32);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(12, 29, 59, 0.98), rgba(11, 17, 37, 0.98));
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(214, 238, 255, 0.1);
+  color: #eff7ff;
 }
 
-.login-nexus-trigger small {
+.login-modal::before {
   position: absolute;
-  z-index: 2;
-  bottom: 11px;
-  color: #86cfff;
-  font-size: 9px;
+  top: 0;
+  right: 20%;
+  left: 20%;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgba(93, 212, 255, 0.9), transparent);
+  box-shadow: 0 0 18px rgba(93, 212, 255, 0.45);
+}
+
+.login-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(146, 179, 224, 0.1);
+  color: #a8bdd8;
+  cursor: pointer;
+}
+
+.login-modal-close:hover {
+  background: rgba(146, 179, 224, 0.2);
+  color: #ffffff;
+}
+
+.login-modal-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 17px;
+  border-radius: 14px;
+}
+
+.login-modal-icon-login {
+  border: 1px solid rgba(255, 196, 0, 0.36);
+  background: rgba(255, 196, 0, 0.12);
+  color: #ffc400;
+}
+
+.login-modal-icon-register {
+  border: 1px solid rgba(0, 220, 162, 0.36);
+  background: rgba(0, 220, 162, 0.12);
+  color: #00dca2;
+}
+
+.login-modal-eyebrow {
+  color: #86a9cf;
+  font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.login-modal h2 {
+  margin: 7px 0 0;
+  color: #f6fbff;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 
-.login-nexus-radar {
-  position: absolute;
-  inset: 18px;
-  border-radius: 50%;
-  background: rgba(72, 171, 255, 0.13);
-  box-shadow: 0 0 18px rgba(72, 190, 255, 0.26);
+.login-modal-description {
+  margin: 10px 0 24px;
+  color: #9db2ce;
+  font-size: 13px;
+  line-height: 1.75;
 }
 
-.login-chain-form {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  pointer-events: none;
+.login-form {
+  display: grid;
+  gap: 16px;
 }
 
-.login-entry {
-  --entry-open-width: 260px;
+.login-field {
+  display: grid;
+  gap: 7px;
+  color: #bfd0e6;
+  font-size: 12px;
+  font-weight: 600;
+}
 
-  position: absolute;
-  z-index: 3;
-  width: 56px;
-  height: 56px;
-  overflow: hidden;
+.login-field-control {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   box-sizing: border-box;
-  border: 1px solid rgba(105, 190, 255, 0.48);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 27px 24px, rgba(95, 196, 255, 0.2), transparent 25px),
-    rgba(7, 18, 40, 0.7);
-  color: #a9d9ff;
-  box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.3),
-    0 0 24px rgba(62, 150, 255, 0.18),
-    inset 0 0 18px rgba(85, 188, 255, 0.08);
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
-  pointer-events: auto;
-  transition:
-    width 0.34s cubic-bezier(0.2, 0.76, 0.2, 1),
-    border-color 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease;
+  padding: 0 13px;
+  border: 1px solid rgba(125, 174, 228, 0.26);
+  border-radius: 8px;
+  background: rgba(2, 11, 27, 0.64);
+  color: #7faad3;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
-.login-account-entry {
-  left: 40%;
-  bottom: 22%;
-  animation: login-chain-node-in 0.55s 0.1s cubic-bezier(0.18, 0.8, 0.2, 1) both;
+.login-field-control:focus-within {
+  border-color: rgba(93, 212, 255, 0.76);
+  background: rgba(3, 15, 34, 0.86);
+  box-shadow: 0 0 0 3px rgba(93, 212, 255, 0.12);
 }
 
-.login-password-entry {
-  left: 58%;
-  bottom: 43%;
-  color: #c5b5ff;
-  border-color: rgba(158, 133, 255, 0.5);
-  background:
-    radial-gradient(circle at 27px 24px, rgba(157, 126, 255, 0.21), transparent 25px),
-    rgba(12, 16, 42, 0.72);
-  animation: login-chain-node-in 0.55s 0.24s cubic-bezier(0.18, 0.8, 0.2, 1) both;
-}
-
-.login-entry::after {
-  position: absolute;
-  inset: 5px auto 5px 5px;
-  z-index: 0;
-  width: 44px;
-  border: 1px solid rgba(121, 207, 255, 0.16);
-  border-radius: 50%;
-  content: '';
-  pointer-events: none;
-}
-
-.login-password-entry::after {
-  border-color: rgba(181, 155, 255, 0.17);
-}
-
-.login-entry:focus-within {
-  width: var(--entry-open-width);
-  border-color: rgba(103, 209, 255, 0.9);
-  background: rgba(8, 22, 48, 0.9);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.34),
-    0 0 30px rgba(61, 173, 255, 0.3),
-    inset 0 0 22px rgba(82, 194, 255, 0.1);
-}
-
-.login-password-entry:focus-within {
-  border-color: rgba(174, 148, 255, 0.88);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.34),
-    0 0 30px rgba(144, 105, 255, 0.28),
-    inset 0 0 22px rgba(158, 126, 255, 0.1);
-}
-
-.login-entry-icon {
-  position: absolute;
-  z-index: 3;
-  top: 50%;
-  left: 18px;
-  pointer-events: none;
-  transform: translateY(-50%);
-}
-
-.login-entry-input {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
+.login-field-control input {
+  min-width: 0;
   width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0 46px 0 56px;
+  height: 44px;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
-  color: #eef7ff;
-  caret-color: #73d5ff;
+  color: #f4f8ff;
+  caret-color: #65d9ff;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
-.login-account-entry .login-entry-input {
-  padding-right: 74px;
-}
-
-.login-entry-input::placeholder {
-  color: #7187aa;
-  opacity: 0;
-  transition: opacity 0.16s ease;
-}
-
-.login-entry:focus-within .login-entry-input::placeholder,
-.login-entry:focus-within .login-password-toggle,
-.login-entry:focus-within .login-remember-control {
-  opacity: 1;
-}
-
-.login-entry-input:disabled {
-  cursor: wait;
+.login-field-control input::placeholder {
+  color: #647e9f;
 }
 
 .login-password-toggle {
-  position: absolute;
-  z-index: 3;
-  top: 50%;
-  right: 12px;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: grid;
+  flex: 0 0 auto;
   place-items: center;
-  margin: 0;
-  padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: #8e82bd;
+  color: #8da5c4;
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
-  transition: color 0.2s ease, opacity 0.16s ease;
 }
 
-.login-password-entry:focus-within .login-password-toggle {
-  pointer-events: auto;
-}
-
-.login-password-toggle:hover,
-.login-password-toggle:focus-visible {
-  color: #ddd5ff;
-  outline: 0;
+.login-password-toggle:hover {
+  color: #d7e8ff;
+  background: rgba(140, 188, 238, 0.12);
 }
 
 .login-remember-control {
-  position: absolute;
-  z-index: 3;
-  top: 50%;
-  right: 13px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  color: #829abb;
+  gap: 8px;
+  width: fit-content;
+  color: #91a9c6;
   cursor: pointer;
-  font-size: 9px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
-  transition: color 0.2s ease, opacity 0.16s ease;
-}
-
-.login-account-entry:focus-within .login-remember-control {
-  pointer-events: auto;
+  font-size: 12px;
 }
 
 .login-remember-control input {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   margin: 0;
-  border: 1px solid rgba(111, 190, 255, 0.48);
-  border-radius: 4px;
-  appearance: none;
-  background: rgba(5, 14, 32, 0.72);
+  accent-color: #43a8ff;
+}
+
+.login-form-error {
+  margin: -3px 0 0;
+  color: #ff9eae;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.login-form-submit {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 2px;
+  border: 1px solid rgba(104, 229, 218, 0.5);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(40, 168, 166, 0.92), rgba(33, 98, 145, 0.96));
+  color: #f2fffd;
   cursor: pointer;
-}
-
-.login-remember-control > svg {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  color: #ffffff;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.login-remember-control input:checked {
-  border-color: #4c9dff;
-  background: #3188ed;
-}
-
-.login-remember-control input:checked + svg {
-  opacity: 1;
-}
-
-.login-remember-control:focus-within,
-.login-remember-control:hover {
-  color: #c7d9ef;
-}
-
-.login-submit-orb {
-  left: 78%;
-  bottom: 64%;
-  width: 68px;
-  height: 68px;
-  grid-template-rows: 26px 12px;
-  align-content: center;
-  gap: 2px;
-  color: #ffffff;
-  border: 1px solid rgba(88, 227, 215, 0.72);
-  background:
-    radial-gradient(circle at 35% 30%, rgba(156, 255, 235, 0.54), transparent 28%),
-    radial-gradient(circle, rgba(46, 178, 184, 0.76), rgba(22, 82, 125, 0.87) 68%);
-  box-shadow:
-    0 0 0 8px rgba(70, 221, 211, 0.06),
-    0 0 36px rgba(58, 225, 215, 0.4),
-    inset 0 0 24px rgba(156, 255, 235, 0.2);
-  animation: login-chain-node-in 0.58s 0.4s cubic-bezier(0.18, 0.8, 0.2, 1) both, login-orb-breathe 2.8s 1s ease-in-out infinite;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.login-submit-orb:hover,
-.login-submit-orb:focus-visible {
-  border-color: rgba(194, 255, 242, 0.96);
-  box-shadow:
-    0 0 0 9px rgba(70, 221, 211, 0.08),
-    0 0 46px rgba(72, 244, 226, 0.58),
-    inset 0 0 26px rgba(189, 255, 241, 0.28);
-}
-
-.login-submit-orb span {
-  color: #eafffb;
-  font-size: 9px;
+  font: inherit;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0;
+  box-shadow: 0 10px 24px rgba(26, 165, 173, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.login-submit-orb svg {
-  animation: none;
+.login-form-submit:hover,
+.login-form-submit:focus-visible {
+  border-color: rgba(189, 255, 242, 0.9);
+  box-shadow: 0 14px 30px rgba(26, 195, 190, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
 }
 
-.login-submit-orb .login-loading-icon {
-  animation: login-spin 0.9s linear infinite;
+.login-loading-icon {
+  animation: login-spin 0.85s linear infinite;
 }
 
-.login-chain-status {
-  position: absolute;
-  z-index: 5;
-  left: calc(27% + 86px);
-  bottom: calc(7.5% + 27px);
-  width: min(300px, 24vw);
-  height: 18px;
+.login-register-note {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  box-sizing: border-box;
-  margin: 0;
-  color: #8ba6c8;
-  font-size: 10px;
-  line-height: 18px;
-  letter-spacing: 0;
-  pointer-events: none;
-  white-space: nowrap;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid rgba(0, 220, 162, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 220, 162, 0.07);
+  color: #b6dbd4;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
-.login-chain-status span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.login-register-note svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #00dca2;
 }
 
-.login-chain-status.is-error {
-  color: #ff9caf;
+.login-register-back {
+  margin-top: 22px;
 }
 
-.login-chain-status.is-error i {
-  background: #ff6f89;
-  box-shadow: 0 0 10px rgba(255, 83, 118, 0.84);
+.login-modal-enter-active,
+.login-modal-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.login-modal-enter-active .login-modal,
+.login-modal-leave-active .login-modal {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.login-modal-enter-from,
+.login-modal-leave-to {
+  opacity: 0;
+}
+
+.login-modal-enter-from .login-modal,
+.login-modal-leave-to .login-modal {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
 }
 
 .login-sr-only {
@@ -892,37 +841,6 @@ onMounted(() => {
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .login-entry:hover {
-    width: var(--entry-open-width);
-    border-color: rgba(103, 209, 255, 0.9);
-    background: rgba(8, 22, 48, 0.9);
-    box-shadow:
-      0 18px 42px rgba(0, 0, 0, 0.34),
-      0 0 30px rgba(61, 173, 255, 0.3),
-      inset 0 0 22px rgba(82, 194, 255, 0.1);
-  }
-
-  .login-password-entry:hover {
-    border-color: rgba(174, 148, 255, 0.88);
-    box-shadow:
-      0 18px 42px rgba(0, 0, 0, 0.34),
-      0 0 30px rgba(144, 105, 255, 0.28),
-      inset 0 0 22px rgba(158, 126, 255, 0.1);
-  }
-
-  .login-entry:hover .login-entry-input::placeholder,
-  .login-entry:hover .login-password-toggle,
-  .login-entry:hover .login-remember-control {
-    opacity: 1;
-  }
-
-  .login-account-entry:hover .login-remember-control,
-  .login-password-entry:hover .login-password-toggle {
-    pointer-events: auto;
-  }
 }
 
 @keyframes login-rise {
@@ -945,75 +863,10 @@ onMounted(() => {
   }
 }
 
-@keyframes login-chain-node-in {
-  from {
-    opacity: 0;
-    transform: translate(-34px, 34px) scale(0.58);
-  }
-  to {
-    opacity: 1;
-    transform: translate(0, 0) scale(1);
-  }
-}
-
-@keyframes login-rail-draw {
-  from {
-    stroke-dashoffset: 110;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes login-rail-flow {
-  to {
-    stroke-dashoffset: -28;
-  }
-}
-
-@keyframes login-node-flare {
-  50% {
-    opacity: 0.45;
-  }
-}
-
-@keyframes login-nexus-turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes login-nexus-breathe {
-  50% {
-    opacity: 0.32;
-    transform: scale(1.09);
-  }
-}
-
-@keyframes login-orb-breathe {
-  50% {
-    box-shadow:
-      0 0 0 11px rgba(70, 221, 211, 0.08),
-      0 0 48px rgba(58, 225, 215, 0.52),
-      inset 0 0 28px rgba(156, 255, 235, 0.24);
-  }
-}
-
 @keyframes login-spin {
   to {
     transform: rotate(360deg);
   }
-}
-
-.login-status-enter-active,
-.login-status-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-
-.login-status-enter-from,
-.login-status-leave-to {
-  opacity: 0;
-  transform: translateX(-6px);
 }
 
 @media (max-width: 1180px) {
@@ -1022,36 +875,16 @@ onMounted(() => {
   }
 
   .login-visual-copy {
-    margin-left: 0;
-  }
-
-  .login-visual-copy {
     width: min(45%, 455px);
+    margin-left: 0;
   }
 
   .login-visual-copy h1 {
     font-size: 42px;
   }
 
-  .login-nexus-trigger {
-    left: 25%;
-  }
-
-  .login-account-entry {
-    left: 39%;
-  }
-
-  .login-password-entry {
-    left: 58%;
-  }
-
-  .login-submit-orb {
-    left: 82%;
-  }
-
-  .login-chain-status {
-    left: calc(25% + 84px);
-    width: min(280px, 28vw);
+  .login-action {
+    min-width: 144px;
   }
 }
 
@@ -1070,15 +903,33 @@ onMounted(() => {
     padding: 18px 16px 14px;
   }
 
+  .login-topbar {
+    justify-content: center;
+  }
+
+  .login-action-bar {
+    width: min(100%, 460px);
+    box-sizing: border-box;
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .login-action {
+    min-width: 0;
+    min-height: 48px;
+    flex: 1;
+    padding: 0 16px;
+    font-size: 15px;
+  }
+
   .login-visual-copy {
     position: absolute;
-    top: 116px;
+    top: 130px;
     left: 20px;
     right: 20px;
     width: auto;
     max-width: 460px;
     margin: 0;
-    padding: 0;
   }
 
   .login-kicker {
@@ -1108,95 +959,35 @@ onMounted(() => {
     padding: 5px 8px;
     font-size: 11px;
   }
+}
 
-  .login-chain-rail.is-desktop {
-    display: none;
+@media (max-width: 480px) {
+  .login-modal-backdrop {
+    padding: 16px;
   }
 
-  .login-chain-rail.is-mobile {
-    display: block;
+  .login-modal {
+    max-height: calc(100dvh - 32px);
+    padding: 34px 22px 24px;
+    border-radius: 14px;
   }
-
-  .login-nexus-trigger {
-    left: 16px;
-    bottom: 38px;
-  }
-
-  .login-account-entry {
-    --entry-open-width: min(316px, calc(100vw - 74px));
-    left: 54px;
-    bottom: 126px;
-  }
-
-  .login-password-entry {
-    --entry-open-width: min(260px, calc(100vw - 132px));
-    left: 112px;
-    bottom: 232px;
-  }
-
-  .login-submit-orb {
-    right: 18px;
-    bottom: 340px;
-    left: auto;
-    width: 68px;
-    height: 68px;
-  }
-
-  .login-chain-status {
-    right: 20px;
-    bottom: 62px;
-    left: 100px;
-    width: auto;
-  }
-
 }
 
 @media (max-width: 360px) {
+  .login-action {
+    gap: 8px;
+    padding-inline: 10px;
+    font-size: 14px;
+  }
+
   .login-visual-copy h1 {
     font-size: 30px;
-  }
-
-  .login-account-entry {
-    --entry-open-width: calc(100vw - 64px);
-    left: 44px;
-  }
-
-  .login-password-entry {
-    --entry-open-width: calc(100vw - 112px);
-    left: 92px;
-  }
-
-  .login-submit-orb {
-    right: 16px;
-  }
-}
-
-@media (max-height: 720px) and (min-width: 821px) {
-  .login-workspace {
-    padding-block: 24px 20px;
-  }
-
-  .login-visual-copy {
-    padding-bottom: 64px;
-  }
-
-  .login-visual-copy h1 {
-    font-size: 38px;
-  }
-
-  .login-visual-copy > p {
-    margin-top: 10px;
-    line-height: 1.55;
-  }
-
-  .login-capabilities {
-    margin-top: 14px;
   }
 }
 
 @media (max-width: 820px) and (max-height: 720px) {
   .login-visual-copy {
-    top: 92px;
+    top: 104px;
   }
 
   .login-visual-copy h1 {
@@ -1210,40 +1001,16 @@ onMounted(() => {
   .login-capabilities {
     margin-top: 13px;
   }
-
-  .login-nexus-trigger {
-    bottom: 18px;
-  }
-
-  .login-account-entry {
-    bottom: 92px;
-  }
-
-  .login-password-entry {
-    bottom: 180px;
-  }
-
-  .login-submit-orb {
-    bottom: 276px;
-  }
-
-  .login-chain-status {
-    bottom: 42px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .login-scanline,
   .login-visual-copy,
-  .login-nexus-trigger::before,
-  .login-nexus-trigger::after,
-  .login-chain-rail .rail-core,
-  .login-chain-rail circle,
-  .login-entry,
-  .login-submit-orb,
-  .login-submit-orb svg,
-  .login-status-enter-active,
-  .login-status-leave-active {
+  .login-loading-icon,
+  .login-modal-enter-active,
+  .login-modal-leave-active,
+  .login-modal-enter-active .login-modal,
+  .login-modal-leave-active .login-modal {
     animation: none !important;
     transition-duration: 0.01ms !important;
   }

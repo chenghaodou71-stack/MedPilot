@@ -1,13 +1,20 @@
 import json
+from pathlib import Path
 
+import numpy as np
 import pytest
 
+from app.rag.corpus import CORPUS
+from app.rag.index import build_index
+from app.rag.retriever import reset_retrieval_stats, retrieve
 from evaluation.evaluator import (
     CaseOutcome,
     EvaluationCase,
     compute_classification_metrics,
     compute_retrieval_metrics,
     main,
+    load_cases,
+    run_deterministic,
 )
 
 
@@ -144,3 +151,63 @@ def test_cli_default_json_output_remains_runnable(tmp_path, capsys):
     assert payload["mrr"] == 0.0
     assert payload["citation_traceability"] == 0.0
     assert payload["retrieval_status"] == "not-evaluated"
+
+
+def test_shipped_gold_cases_reference_real_chunks_and_have_nonzero_denominator():
+    service_root = Path(__file__).resolve().parents[1]
+    cases = load_cases(service_root / "evaluation" / "cases.json")
+    metadata = json.loads(
+        (service_root / "app" / "rag" / "index_store" / "medpilot.meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    real_chunk_ids = {item["chunk_id"] for item in metadata}
+    gold_ids = {
+        evidence_id
+        for case in cases
+        for evidence_id in case.gold_evidence_ids
+    }
+
+    assert gold_ids
+    assert gold_ids <= real_chunk_ids
+    metrics = compute_retrieval_metrics(cases, run_deterministic(cases))
+    assert metrics["evaluated_cases"] > 0
+
+
+@pytest.mark.unit
+async def test_shipped_rag_gold_queries_hit_expected_real_corpus_chunks():
+    reset_retrieval_stats()
+    service_root = Path(__file__).resolve().parents[1]
+    cases = {
+        case.case_id: case
+        for case in load_cases(service_root / "evaluation" / "cases.json")
+        if case.case_id.startswith("RAG")
+    }
+    keyword_axes = (
+        (("夜间", "喘息"), 0),
+        (("长期", "咳痰"), 1),
+        (("反酸", "烧心"), 2),
+        (("瘙痒", "红斑", "脱屑"), 3),
+    )
+
+    async def gold_embed(text: str) -> list[float]:
+        vector = np.zeros(4, dtype="float32")
+        for keywords, axis in keyword_axes:
+            if any(keyword in text for keyword in keywords):
+                vector[axis] = 1.0
+        return vector.tolist()
+
+    index, chunks = await build_index(gold_embed, CORPUS)
+    for case in cases.values():
+        evidence = await retrieve(
+            case.text,
+            top_k=3,
+            embed_fn=gold_embed,
+            index=index,
+            chunks=chunks,
+            min_score=0.5,
+        )
+        assert set(case.gold_evidence_ids) & {
+            item.citation_id for item in evidence
+        }, case.case_id
+    reset_retrieval_stats()

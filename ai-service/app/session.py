@@ -5,6 +5,8 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from app.shared_state import RedisSharedState, SharedStateUnavailable
+
 _TTL = timedelta(minutes=30)
 _SUMMARY_LIMIT = 1200
 _FULL_HISTORY_TURNS = 5
@@ -134,6 +136,42 @@ class SessionStore:
             del self._data[session_id]
             return None
         return session
+
+
+class RedisSessionCoordinator:
+    """Distributed session-turn lease; clinical text stays in MySQL."""
+
+    def __init__(self, state: RedisSharedState, *, default_lease_seconds: int = 240) -> None:
+        if default_lease_seconds < 1:
+            raise ValueError("session lease must be positive")
+        self.state = state
+        self.default_lease_seconds = default_lease_seconds
+        self._tokens: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    async def begin_turn(self, session_id: str, *, lease_seconds: int | None = None) -> bool:
+        if not session_id:
+            return True
+        token = await self.state.acquire_lease(
+            "session-turn",
+            session_id,
+            max(1, lease_seconds or self.default_lease_seconds) * 1000,
+        )
+        if token is None:
+            if self.state.required and self.state.client is None:
+                raise SharedStateUnavailable("Redis session state is unavailable")
+            return False
+        with self._lock:
+            self._tokens[session_id] = token
+        return True
+
+    async def end_turn(self, session_id: str) -> None:
+        if not session_id:
+            return
+        with self._lock:
+            token = self._tokens.pop(session_id, None)
+        if token is not None:
+            await self.state.release_lease("session-turn", session_id, token)
 
 
 store = SessionStore()

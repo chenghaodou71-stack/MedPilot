@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -16,13 +16,11 @@ import {
   CircleCheck,
   Clock,
   Close,
-  DataAnalysis,
   Delete,
   Document,
   EditPen,
   FirstAidKit,
   InfoFilled,
-  MagicStick,
   Promotion,
   Reading,
   RefreshRight,
@@ -54,7 +52,7 @@ import {
   resolveWorkflowAgentKeys,
   summarizeWorkflowProgress,
 } from '../lib/consultWorkflow'
-import { formatTriageSupportScore, normalizeTriageFactors } from '../lib/triageExplanation'
+import { normalizeTriageFactors } from '../lib/triageExplanation'
 import {
   appendConfirmedAttachments,
   ATTACHMENT_ACCEPT,
@@ -62,6 +60,13 @@ import {
   normalizeAttachment,
   validateAttachmentCandidate,
 } from '../lib/consultAttachments'
+import { describeConsultError } from '../lib/consultError'
+import {
+  clearConsultDraft,
+  createConsultDraft,
+  loadConsultDraft,
+  saveConsultDraft,
+} from '../lib/consultDraft'
 
 const router = useRouter()
 const route = useRoute()
@@ -176,6 +181,7 @@ const WORKFLOW_AGENT_CATALOG = [...AGENTS, FOLLOWUP_AGENT]
 const stage = ref('landing')
 const workflowStep = ref(0)
 const quickInput = ref('')
+const quickInputImported = ref(false)
 const selectedSymptoms = ref([])
 const attachmentInput = ref(null)
 const attachments = ref([])
@@ -196,6 +202,10 @@ const progress = ref(0)
 const isSubmitting = ref(false)
 const abortController = ref(null)
 const requestError = ref('')
+const requestErrorSource = ref(null)
+const intakeTouched = reactive({ symptoms: false, description: false })
+const feedbackSelection = ref('')
+const feedbackSubmitted = ref(false)
 const lastSubmittedText = ref('')
 const followupQuestion = ref('')
 const followupInput = ref('')
@@ -213,6 +223,9 @@ const resultCreatedAt = ref(null)
 
 const recentRecords = ref([])
 const recentLoading = ref(true)
+const pendingDraft = ref(null)
+const draftSaveSuspended = ref(false)
+let draftSaveTimer = null
 
 const displayName = computed(() => {
   if (!auth.username) return '用户'
@@ -223,6 +236,57 @@ const canSubmitIntake = computed(
   () => selectedSymptoms.value.length > 0 && isQuickConsultReady(form.description),
 )
 const canSubmitFollowup = computed(() => followupInput.value.trim().length >= 1)
+const followupMissing = computed(() => traceState.value.followup?.missing || [])
+const followupSuggestions = computed(() => {
+  const missing = new Set(followupMissing.value)
+  if (missing.has('duration')) return ['今天开始', '1-3 天', '超过一周', '暂时无法回答']
+  if (missing.has('severity')) return ['轻微', '中等', '严重', '不确定']
+  if (missing.has('more_symptoms')) return ['没有其他不适', '还有其他不适', '不确定']
+  return ['不确定', '暂时无法回答']
+})
+const followupExample = computed(() => {
+  const missing = new Set(followupMissing.value)
+  if (missing.has('duration')) return '例如：刚开始 2 天、反复一个月'
+  if (missing.has('severity')) return '例如：轻微、不影响活动，或正在加重'
+  if (missing.has('more_symptoms')) return '例如：没有，或还有头晕、乏力'
+  return '可以选择“不确定”，也可以先跳过这一项。'
+})
+const stageContext = computed(() => {
+  if (stage.value === 'intake') {
+    return { title: '第 1/3 步：补充症状', detail: '补充越完整，风险评估和科室建议越可靠。' }
+  }
+  if (stage.value === 'processing') {
+    return { title: '第 2/3 步：安全分析中', detail: '系统会先检查危险信号，再整理症状和医学依据。' }
+  }
+  if (stage.value === 'result') {
+    return { title: '第 3/3 步：查看分诊建议', detail: '先看行动建议，再展开判定依据和医学来源。' }
+  }
+  return null
+})
+const requestErrorInfo = computed(() => (
+  requestErrorSource.value
+    ? describeConsultError(requestErrorSource.value)
+    : requestError.value
+      ? { title: '问诊服务暂时不可用', detail: requestError.value, action: 'retry' }
+      : null
+))
+const journeySteps = [
+  { number: '1', label: '补充症状', stage: 'intake' },
+  { number: '2', label: '安全分析', stage: 'processing' },
+  { number: '3', label: '查看建议', stage: 'result' },
+]
+const processingSteps = computed(() => (isEmergencyFastPath.value
+  ? [
+      { key: 'safety_screen', label: '正在检查危险信号' },
+      { key: 'classify', label: '正在确认风险与就医时效' },
+      { key: 'compose', label: '正在生成紧急行动建议' },
+    ]
+  : [
+      { key: 'safety_screen', label: '正在检查危险信号' },
+      { key: 'extract', label: '正在识别症状' },
+      { key: 'retrieve', label: '正在匹配医学资料' },
+      { key: 'compose', label: '正在生成分诊建议' },
+    ]))
 const isHighRisk = computed(
   () => Boolean(traceState.value.emergency) || triageData.value?.risk_level === '高',
 )
@@ -248,9 +312,6 @@ const currentTraceElapsedMs = computed(() => Object.values(traceState.value.node
 const hasSupportScore = computed(() => (
   Object.prototype.hasOwnProperty.call(triageData.value || {}, 'support_score')
 ))
-const supportScore = computed(() => formatTriageSupportScore(
-  hasSupportScore.value ? triageData.value?.support_score : triageData.value?.confidence,
-))
 const triageFactors = computed(() => normalizeTriageFactors(triageData.value?.factors))
 
 const resultSymptoms = computed(() => {
@@ -270,7 +331,7 @@ const completedAgentCount = computed(() => workflowProgress.value.completed)
 const supportScoreLabel = computed(() => (
   hasSupportScore.value
     ? (isEmergencyFastPath.value || Boolean(triageData.value?.matched_rule) ? '规则支持分' : '检索支持度')
-    : '历史置信字段（兼容）'
+    : '辅助依据评分'
 ))
 
 const visualizationSupportScore = computed(() => (
@@ -307,7 +368,15 @@ function stepStatus(agentKey) {
   }[agentStatus[agentKey]] || 'wait'
 }
 
+function processingStepState(key) {
+  if (key === 'compose' && agentStatus.classify === 'done' && agentStatus.compose === 'waiting') {
+    return 'waiting'
+  }
+  return agentStatus[key] || 'waiting'
+}
+
 function traceEventLabel(event) {
+  if (event.type === 'answer_delta') return '回答输出'
   if (event.type === 'done') return '流程完成'
   if (event.type === 'error') return '流程异常'
   if (event.node === 'ask_followup') return '主动追问'
@@ -320,13 +389,101 @@ function traceEventLabel(event) {
 function traceEventStatus(event) {
   return {
     started: '开始',
+    streaming: '输出中',
     completed: '完成',
     error: '异常',
   }[event.status] || event.status
 }
 
+function draftUsername() {
+  return auth.username || 'anonymous'
+}
+
+function hasDraftContent() {
+  return Boolean(
+    quickInput.value.trim()
+    || selectedSymptoms.value.length
+    || form.description.trim()
+    || form.name.trim()
+    || form.gender
+    || form.age
+    || form.duration
+    || form.severity
+    || attachments.value.length,
+  )
+}
+
+function persistConsultDraft() {
+  if (draftSaveSuspended.value || !['landing', 'intake'].includes(stage.value)) return
+  if (!hasDraftContent()) {
+    clearConsultDraft(draftUsername())
+    return
+  }
+  saveConsultDraft(draftUsername(), createConsultDraft({
+    stage: stage.value,
+    sessionId: sessionId.value,
+    quickInput: quickInput.value,
+    selectedSymptoms: selectedSymptoms.value,
+    form,
+    attachments: attachments.value,
+  }))
+}
+
+function scheduleConsultDraftSave() {
+  if (draftSaveTimer) window.clearTimeout(draftSaveTimer)
+  draftSaveTimer = window.setTimeout(() => {
+    draftSaveTimer = null
+    persistConsultDraft()
+  }, 250)
+}
+
+function restoreDraft() {
+  const draft = pendingDraft.value
+  if (!draft) return
+  draftSaveSuspended.value = true
+  sessionId.value = draft.sessionId || createSessionId()
+  quickInput.value = draft.quickInput
+  quickInputImported.value = Boolean(draft.quickInput)
+  selectedSymptoms.value = [...draft.selectedSymptoms]
+  Object.assign(form, draft.form)
+  attachments.value = draft.attachments.map(normalizeAttachment)
+  stage.value = 'intake'
+  workflowStep.value = 0
+  pendingDraft.value = null
+  draftSaveSuspended.value = false
+  ElMessage.success('已恢复上次未完成的问诊')
+  scrollToTop()
+}
+
+function discardDraft() {
+  pendingDraft.value = null
+  clearConsultDraft(draftUsername())
+  ElMessage.info('已清除未完成的问诊草稿')
+}
+
+function formatDraftTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '最近保存'
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function missingLabel(missing) {
+  return {
+    symptoms: '主要症状',
+    more_symptoms: '其他不适',
+    duration: '持续时间',
+    severity: '严重程度',
+  }[missing] || missing
+}
+
 function beginIntake() {
   const quickDescription = normalizeQuickConsultText(quickInput.value)
+  quickInputImported.value = Boolean(quickDescription)
   if (quickDescription) form.description = quickDescription
   stage.value = 'intake'
   workflowStep.value = 0
@@ -409,6 +566,7 @@ function resetResultData() {
   safetyBoundary.value = ''
   resultCreatedAt.value = null
   requestError.value = ''
+  requestErrorSource.value = null
   followupQuestion.value = ''
   followupInput.value = ''
   traceState.value = createConsultTraceState()
@@ -416,8 +574,10 @@ function resetResultData() {
 }
 
 async function submitIntake() {
+  intakeTouched.symptoms = true
+  intakeTouched.description = true
   if (!canSubmitIntake.value) {
-    ElMessage.warning('请选择主要症状并补充症状描述')
+    ElMessage.warning('请先完成标有“必填”的内容')
     return
   }
 
@@ -429,8 +589,8 @@ async function submitIntake() {
   await requestConsult(text)
 }
 
-async function submitFollowup() {
-  const text = followupInput.value.trim()
+async function submitFollowup(value = followupInput.value) {
+  const text = String(value || '').trim()
   if (!text || isSubmitting.value) return
 
   conversation.value.push({ role: 'user', text })
@@ -440,11 +600,19 @@ async function submitFollowup() {
   await requestConsult(text)
 }
 
+function selectFollowupSuggestion(value) {
+  followupInput.value = value
+  submitFollowup(value)
+}
+
 async function requestConsult(text) {
   stage.value = 'processing'
   workflowStep.value = 0
   progress.value = 0
   requestError.value = ''
+  requestErrorSource.value = null
+  feedbackSelection.value = ''
+  feedbackSubmitted.value = false
   followupQuestion.value = ''
   structuredSymptoms.value = null
   evidenceList.value = []
@@ -473,7 +641,9 @@ async function requestConsult(text) {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null)
-      throw new Error(payload?.error || `问诊服务请求失败（${response.status}）`)
+      const requestFailure = new Error(payload?.error || `问诊服务请求失败（${response.status}）`)
+      requestFailure.status = response.status
+      throw requestFailure
     }
     if (!response.body) {
       throw new Error('问诊服务未返回可读取的响应流。')
@@ -503,13 +673,11 @@ async function requestConsult(text) {
       throw new Error('问诊服务响应提前结束，请重新发起问诊。')
     }
   } catch (error) {
-    if (error.name === 'AbortError') {
-      requestError.value = '本次处理已取消，您可以修改问诊信息后重新提交。'
-    } else if (error instanceof ConsultTraceProtocolError || error.name === 'NdjsonProtocolError') {
-      requestError.value = `问诊响应协议异常：${error.message}`
-    } else {
-      requestError.value = error.message || '问诊服务暂时不可用，请稍后重试。'
+    requestErrorSource.value = error
+    if (error instanceof ConsultTraceProtocolError || error.name === 'NdjsonProtocolError') {
+      requestErrorSource.value = { status: 503 }
     }
+    requestError.value = describeConsultError(requestErrorSource.value).detail
     markRunningAgentAsError()
   } finally {
     isSubmitting.value = false
@@ -533,6 +701,7 @@ function applyTraceEvent(event) {
   saveTraceSnapshot(next)
 
   if (next.status === 'error') {
+    requestErrorSource.value = { status: 503 }
     requestError.value = next.error || '智能问诊服务发生异常，请稍后重试。'
     return true
   }
@@ -559,6 +728,7 @@ function applyTraceEvent(event) {
   workflowStep.value = workflowAgents.value.length
   stage.value = 'result'
   resultCreatedAt.value = new Date()
+  clearConsultDraft(draftUsername())
   if (consultationNotificationsEnabled()) ElMessage.success('问诊分析已完成')
   scrollToTop()
   return true
@@ -572,11 +742,14 @@ function syncTraceUi(state) {
   if (state.symptoms) structuredSymptoms.value = state.symptoms
   if (state.nodes.retrieve?.status === 'done') evidenceList.value = state.evidence
   if (state.triage) triageData.value = state.triage
-  if (state.answer) {
-    answerText.value = state.answer.text || ''
-    answerCitations.value = state.citations
-    safetyBoundary.value = state.answer.safety_boundary || ''
-  }
+  // Compose completion carries the full answer as a validation target. The
+  // user sees only the deltas already received; the terminal event promotes
+  // the validated answer to the final display.
+  answerText.value = state.answer?.text || state.streamedAnswerText || ''
+  answerCitations.value = state.citations
+  safetyBoundary.value = state.answer?.safety_boundary
+    || state.expectedAnswer?.safety_boundary
+    || ''
 
   const summary = summarizeWorkflowProgress(
     workflowAgents.value.map((agent) => agent.key),
@@ -613,6 +786,8 @@ function cancelConsult() {
 
 function retryConsult() {
   if (!lastSubmittedText.value || isSubmitting.value) return
+  requestError.value = ''
+  requestErrorSource.value = null
   resetAgentStatus()
   requestConsult(lastSubmittedText.value)
 }
@@ -622,15 +797,22 @@ function backToIntake() {
   stage.value = 'intake'
   workflowStep.value = 0
   requestError.value = ''
+  requestErrorSource.value = null
   scrollToTop()
 }
 
 function startNewConsult() {
   abortController.value?.abort()
+  draftSaveSuspended.value = true
+  if (draftSaveTimer) window.clearTimeout(draftSaveTimer)
+  draftSaveTimer = null
+  clearConsultDraft(draftUsername())
+  pendingDraft.value = null
   sessionId.value = createSessionId()
   stage.value = 'landing'
   workflowStep.value = 0
   quickInput.value = ''
+  quickInputImported.value = false
   selectedSymptoms.value = []
   attachments.value = []
   Object.assign(form, {
@@ -646,7 +828,12 @@ function startNewConsult() {
   lastSubmittedText.value = ''
   resetAgentStatus()
   resetResultData()
+  intakeTouched.symptoms = false
+  intakeTouched.description = false
+  feedbackSelection.value = ''
+  feedbackSubmitted.value = false
   fetchRecentRecords()
+  draftSaveSuspended.value = false
   scrollToTop()
 }
 
@@ -655,6 +842,15 @@ function formatEvidenceScore(score) {
   if (!Number.isFinite(value)) return ''
   const percent = value <= 1 ? value * 100 : value
   return `${Math.max(0, Math.min(100, Math.round(percent)))}%`
+}
+
+function formatEvidenceType(sourceType) {
+  return {
+    pdf: 'PDF',
+    md: 'Markdown',
+    txt: '纯文本',
+    text: '文字资料',
+  }[String(sourceType || '').toLowerCase()] || '医学知识库资料'
 }
 
 function riskTagType(level) {
@@ -682,6 +878,18 @@ function scrollToTop() {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+function submitResultFeedback(value) {
+  feedbackSelection.value = value
+  feedbackSubmitted.value = true
+  ElMessage.success('感谢反馈，我们会把它用于改进后续问诊体验')
+}
+
+watch(
+  [stage, quickInput, selectedSymptoms, form, attachments],
+  () => scheduleConsultDraftSave(),
+  { deep: true },
+)
+
 async function fetchRecentRecords() {
   recentLoading.value = true
   try {
@@ -697,17 +905,34 @@ async function fetchRecentRecords() {
 onMounted(() => {
   const symptom = Array.isArray(route.query.symptom) ? route.query.symptom[0] : route.query.symptom
   if (symptom) quickInput.value = String(symptom)
+  if (!symptom) pendingDraft.value = loadConsultDraft(draftUsername())
   fetchRecentRecords()
 })
 
 onBeforeUnmount(() => {
   abortController.value?.abort()
+  if (draftSaveTimer) window.clearTimeout(draftSaveTimer)
 })
 </script>
 
 <template>
   <div class="consult-page">
     <template v-if="stage === 'landing'">
+      <section
+        v-if="pendingDraft"
+        class="draft-resume-banner"
+        role="status"
+        data-testid="draft-resume-banner"
+      >
+        <div class="draft-resume-copy">
+          <strong>发现未完成的问诊</strong>
+          <p>上次填写于 {{ formatDraftTime(pendingDraft.savedAt) }}，草稿仅保存在当前浏览器 24 小时。</p>
+        </div>
+        <div class="draft-resume-actions">
+          <el-button text @click="discardDraft">清除草稿</el-button>
+          <el-button type="primary" @click="restoreDraft">继续填写</el-button>
+        </div>
+      </section>
       <section class="welcome-banner" aria-labelledby="welcome-title">
         <div class="welcome-content">
           <div class="welcome-kicker">
@@ -871,6 +1096,22 @@ onBeforeUnmount(() => {
         </el-button>
       </header>
 
+      <div v-if="stageContext" class="step-context" role="status" aria-live="polite">
+        <strong>{{ stageContext.title }}</strong>
+        <span>{{ stageContext.detail }}</span>
+      </div>
+
+      <ol class="journey-steps" aria-label="问诊任务进度">
+        <li
+          v-for="item in journeySteps"
+          :key="item.stage"
+          :class="{ 'is-active': stage === item.stage, 'is-complete': journeySteps.findIndex((step) => step.stage === stage) > journeySteps.findIndex((step) => step.stage === item.stage) }"
+        >
+          <span>{{ item.number }}</span>
+          <strong>{{ item.label }}</strong>
+        </li>
+      </ol>
+
       <section class="steps-panel" :class="{ 'steps-panel-fast': isEmergencyFastPath }" aria-label="问诊进度">
         <div v-if="isEmergencyFastPath" class="fast-path-banner" role="status">
           <span class="fast-path-icon"><ShieldAlert :size="20" :stroke-width="1.9" aria-hidden="true" /></span>
@@ -897,6 +1138,11 @@ onBeforeUnmount(() => {
             <h2>完善问诊信息</h2>
             <p>带 * 的内容将直接影响症状识别与风险评估。</p>
           </div>
+        </div>
+
+        <div v-if="quickInputImported" class="imported-description-note" role="status">
+          <el-icon><CircleCheck /></el-icon>
+          <span>已将快速描述带入下方症状描述，可直接修改。</span>
         </div>
 
         <el-form label-position="top" class="intake-form">
@@ -929,7 +1175,12 @@ onBeforeUnmount(() => {
               <strong>主要症状</strong>
               <span>至少选择一项 *</span>
             </div>
-            <el-checkbox-group v-model="selectedSymptoms" class="symptom-options">
+            <el-checkbox-group
+              v-model="selectedSymptoms"
+              class="symptom-options"
+              :class="{ 'has-error': intakeTouched.symptoms && !selectedSymptoms.length }"
+              @change="intakeTouched.symptoms = true"
+            >
               <el-checkbox
                 v-for="symptom in SYMPTOM_OPTIONS"
                 :key="symptom"
@@ -939,6 +1190,9 @@ onBeforeUnmount(() => {
                 {{ symptom }}
               </el-checkbox>
             </el-checkbox-group>
+            <p v-if="intakeTouched.symptoms && !selectedSymptoms.length" class="field-error" role="alert">
+              请至少选择一项主要症状。
+            </p>
           </div>
 
           <div class="form-section">
@@ -954,8 +1208,14 @@ onBeforeUnmount(() => {
               maxlength="500"
               show-word-limit
               resize="none"
+              :class="{ 'has-error': intakeTouched.description && !form.description.trim() }"
+              :aria-invalid="intakeTouched.description && !form.description.trim()"
               placeholder="请描述症状出现的时间、部位、变化，以及是否伴有其他不适"
+              @blur="intakeTouched.description = true"
             />
+            <p v-if="intakeTouched.description && !form.description.trim()" class="field-error" role="alert">
+              请补充症状描述，例如出现时间、变化或伴随不适。
+            </p>
           </div>
 
           <div class="form-section attachment-section">
@@ -1053,7 +1313,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="form-actions">
+          <div class="form-actions intake-submit-bar">
             <el-button @click="stage = 'landing'">
               <el-icon><ArrowLeft /></el-icon>
               返回
@@ -1088,38 +1348,58 @@ onBeforeUnmount(() => {
             <strong>{{ progress }}%</strong>
           </div>
           <el-progress :percentage="progress" :show-text="false" :stroke-width="8" />
-          <div class="trace-meta-bar">
-            <span>Trace ID</span>
-            <code>{{ traceState.traceId || '等待首个事件' }}</code>
-            <small>{{ currentTraceElapsedMs }} ms</small>
+          <div class="friendly-progress-list" aria-live="polite">
+            <div
+              v-for="item in processingSteps"
+              :key="item.key"
+              class="friendly-progress-item"
+              :class="`is-${processingStepState(item.key)}`"
+            >
+              <span class="friendly-progress-icon">
+                <el-icon v-if="processingStepState(item.key) === 'done'"><CircleCheck /></el-icon>
+                <el-icon v-else-if="processingStepState(item.key) === 'error'"><WarningFilled /></el-icon>
+                <i v-else />
+              </span>
+              <strong>{{ item.label }}</strong>
+              <small>{{ processingStepState(item.key) === 'done' ? '已完成' : processingStepState(item.key) === 'running' ? '进行中' : processingStepState(item.key) === 'error' ? '需要重试' : '等待中' }}</small>
+            </div>
           </div>
 
-          <AgentFlowGraph
-            class="processing-agent-flow"
-            :agents="workflowAgents"
-            :status-by-key="agentStatus"
-            :trace-state="traceState"
-          />
-
-          <div v-if="traceState.events.length" class="live-events">
-            <div class="live-events-heading">
-              <strong>实时事件序列</strong>
-              <span>{{ traceState.events.length }} 条</span>
+          <details class="runtime-details">
+            <summary>查看运行详情</summary>
+            <div class="trace-meta-bar">
+              <span>Trace ID</span>
+              <code>{{ traceState.traceId || '等待首个事件' }}</code>
+              <small>{{ currentTraceElapsedMs }} ms</small>
             </div>
-            <div class="live-events-list" aria-live="polite">
-              <div
-                v-for="event in traceState.events"
-                :key="`${event.trace_id}-${event.sequence}`"
-                class="live-event-row"
-                :class="{ 'is-error': event.status === 'error' }"
-              >
-                <code>#{{ event.sequence }}</code>
-                <strong>{{ traceEventLabel(event) }}</strong>
-                <span>{{ traceEventStatus(event) }}</span>
-                <small>{{ event.elapsed_ms }} ms</small>
+
+            <AgentFlowGraph
+              class="processing-agent-flow"
+              :agents="workflowAgents"
+              :status-by-key="agentStatus"
+              :trace-state="traceState"
+            />
+
+            <div v-if="traceState.events.length" class="live-events">
+              <div class="live-events-heading">
+                <strong>实时事件序列</strong>
+                <span>{{ traceState.events.length }} 条</span>
+              </div>
+              <div class="live-events-list" aria-live="polite">
+                <div
+                  v-for="event in traceState.events"
+                  :key="`${event.trace_id}-${event.sequence}`"
+                  class="live-event-row"
+                  :class="{ 'is-error': event.status === 'error' }"
+                >
+                  <code>#{{ event.sequence }}</code>
+                  <strong>{{ traceEventLabel(event) }}</strong>
+                  <span>{{ traceEventStatus(event) }}</span>
+                  <small>{{ event.elapsed_ms }} ms</small>
+                </div>
               </div>
             </div>
-          </div>
+          </details>
 
           <div v-if="evidenceList.length" class="live-evidence">
             <div class="live-evidence-title">
@@ -1134,12 +1414,15 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="requestError" class="processing-error">
-            <el-alert :title="requestError" type="error" :closable="false" show-icon />
+            <el-alert :title="requestErrorInfo?.title || '问诊服务暂时不可用'" type="error" :closable="false" show-icon>
+              <p>{{ requestErrorInfo?.detail || requestError }}</p>
+            </el-alert>
             <div class="inline-actions">
-              <el-button @click="backToIntake">返回修改</el-button>
+              <el-button v-if="requestErrorInfo?.action === 'edit'" @click="backToIntake">返回修改症状</el-button>
+              <el-button v-else plain @click="backToIntake">返回修改</el-button>
               <el-button type="primary" @click="retryConsult">
                 <el-icon><RefreshRight /></el-icon>
-                重新尝试
+                保留内容并重试
               </el-button>
             </div>
           </div>
@@ -1167,26 +1450,53 @@ onBeforeUnmount(() => {
               <span class="message-role">{{ message.role === 'user' ? '您' : 'AI' }}</span>
               <p>{{ message.text }}</p>
             </div>
-            <div v-if="isSubmitting" class="message-row assistant pending-message">
+            <div v-if="isSubmitting && answerText" class="message-row assistant streaming-message">
+              <span class="message-role">AI</span>
+              <p>{{ answerText }}<span class="streaming-caret" aria-hidden="true" /></p>
+            </div>
+            <div v-else-if="isSubmitting" class="message-row assistant pending-message">
               <span class="message-role">AI</span>
               <p><i /><i /><i /></p>
             </div>
           </div>
 
-          <div v-if="followupQuestion && !isSubmitting" class="followup-composer">
-            <el-input
+            <div v-if="followupQuestion && !isSubmitting" class="followup-composer">
+              <div class="followup-prompt">
+                <span class="followup-kicker">还需要补充</span>
+                <strong>{{ followupQuestion }}</strong>
+                <small>这样可以帮助系统判断就医时效和是否需要进一步分诊。</small>
+                <small v-if="followupMissing.length">
+                  用于完善：{{ followupMissing.map(missingLabel).join('、') }}
+                </small>
+                <small class="followup-example">{{ followupExample }}</small>
+              </div>
+            <div v-if="followupSuggestions.length" class="followup-suggestions" aria-label="快捷回答">
+              <button
+                v-for="suggestion in followupSuggestions"
+                :key="suggestion"
+                type="button"
+                @click="selectFollowupSuggestion(suggestion)"
+              >
+                {{ suggestion }}
+              </button>
+            </div>
+              <el-input
               v-model="followupInput"
               type="textarea"
               :rows="3"
               maxlength="300"
               resize="none"
-              placeholder="请补充回答"
+              placeholder="也可以直接输入您的情况，例如：咳嗽已经 3 天了"
               @keyup.ctrl.enter="submitFollowup"
-            />
-            <el-button type="primary" :disabled="!canSubmitFollowup" @click="submitFollowup">
-              <el-icon><Promotion /></el-icon>
-              发送补充
-            </el-button>
+              />
+              <div class="followup-actions">
+                <el-button plain @click="selectFollowupSuggestion('暂时无法回答')">暂时无法回答</el-button>
+                <el-button plain @click="backToIntake">返回补充表单</el-button>
+              <el-button type="primary" :disabled="!canSubmitFollowup" @click="submitFollowup">
+                <el-icon><Promotion /></el-icon>
+                提交补充
+              </el-button>
+            </div>
           </div>
         </aside>
         </div>
@@ -1221,14 +1531,19 @@ onBeforeUnmount(() => {
               </el-tag>
             </div>
 
-            <div class="result-metrics" aria-label="分诊结果摘要">
-              <div class="metric-item">
-                <span class="metric-icon blue"><el-icon><FirstAidKit /></el-icon></span>
-                <div>
-                  <small>推荐科室</small>
-                  <strong>{{ triageData?.department || '暂未生成' }}</strong>
-                </div>
+            <div class="result-action-summary" :class="{ 'is-high-risk': isHighRisk }">
+              <div class="result-action-summary__copy">
+                <span>{{ isHighRisk ? '现在最重要的行动' : '建议下一步' }}</span>
+                <strong>{{ isHighRisk ? '请优先线下就医，不要自行驾车' : `建议前往${triageData?.department || '相应科室'}` }}</strong>
+                <small>{{ triageData?.urgency || '请结合症状变化及时就医' }}</small>
               </div>
+              <a v-if="isHighRisk" class="result-emergency-link" href="tel:120">
+                <el-icon><WarningFilled /></el-icon>
+                拨打 120
+              </a>
+            </div>
+
+            <div class="result-metrics" aria-label="分诊结果摘要">
               <div class="metric-item">
                 <span class="metric-icon orange"><el-icon><WarningFilled /></el-icon></span>
                 <div>
@@ -1237,10 +1552,10 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="metric-item">
-                <span class="metric-icon green"><el-icon><DataAnalysis /></el-icon></span>
+                <span class="metric-icon blue"><el-icon><FirstAidKit /></el-icon></span>
                 <div>
-                  <small>{{ supportScoreLabel }}</small>
-                  <strong>{{ supportScore || '--' }}</strong>
+                  <small>推荐科室</small>
+                  <strong>{{ triageData?.department || '暂未生成' }}</strong>
                 </div>
               </div>
               <div class="metric-item">
@@ -1257,64 +1572,69 @@ onBeforeUnmount(() => {
               <p>{{ answerText || '系统暂未返回自然语言建议。' }}</p>
             </div>
 
-            <div class="result-visualization-section">
-              <TriageScalePanel
-                :risk-level="triageData?.risk_level || ''"
-                :urgency="triageData?.urgency || ''"
-                :support-score="visualizationSupportScore"
-                :support-label="supportScoreLabel"
-                :abstained="Boolean(triageData?.abstained)"
-              />
-            </div>
+            <details class="result-details">
+              <summary>查看判定依据与风险说明</summary>
+              <div class="result-details__body">
+                <div class="result-visualization-section">
+                  <TriageScalePanel
+                    :risk-level="triageData?.risk_level || ''"
+                    :urgency="triageData?.urgency || ''"
+                    :support-score="visualizationSupportScore"
+                    :support-label="supportScoreLabel"
+                    :abstained="Boolean(triageData?.abstained)"
+                  />
+                </div>
 
-            <div class="result-section decision-visualization-section">
-              <DecisionFlowGraph
-                :symptoms="decisionSymptoms"
-                :triage="triageData"
-                :evidence="answerCitations"
-              />
-            </div>
+                <div class="result-section decision-visualization-section">
+                  <DecisionFlowGraph
+                    :symptoms="decisionSymptoms"
+                    :triage="triageData"
+                    :evidence="answerCitations"
+                  />
+                </div>
 
-            <div class="result-section">
-              <h3>症状摘要</h3>
-              <div v-if="resultSymptoms.length" class="result-tags">
-                <el-tag v-for="symptom in resultSymptoms" :key="symptom" effect="light">
-                  {{ symptom }}
-                </el-tag>
-                <el-tag v-if="structuredSymptoms?.duration" type="info" effect="plain">
-                  持续 {{ structuredSymptoms.duration }}
-                </el-tag>
-                <el-tag v-if="structuredSymptoms?.severity" type="warning" effect="plain">
-                  {{ structuredSymptoms.severity }}
-                </el-tag>
-              </div>
-              <p v-else class="muted-copy">未提取到结构化症状，请以系统回答为准。</p>
-              <p v-if="triageData?.matched_rule" class="matched-rule">
-                <el-icon><InfoFilled /></el-icon>
-                已命中风险规则：{{ triageData.matched_rule }}
-              </p>
-              <div v-if="triageData?.explanation || triageFactors.length" class="triage-explanation">
-                <strong>判定依据</strong>
-                <p>{{ triageData?.explanation || '以下依据来自本次安全规则或知识检索。' }}</p>
-                <ul v-if="triageFactors.length">
-                  <li v-for="factor in triageFactors" :key="`${factor.kind}-${factor.reference}-${factor.label}`">
-                    <span>{{ factor.kind === 'rule' ? '安全规则' : '知识证据' }}</span>
-                    <strong>{{ factor.label }}</strong>
-                    <small v-if="factor.support">支持 {{ factor.support }}</small>
-                  </li>
-                </ul>
-              </div>
-            </div>
+                <div class="result-section">
+                  <h3>症状摘要</h3>
+                  <div v-if="resultSymptoms.length" class="result-tags">
+                    <el-tag v-for="symptom in resultSymptoms" :key="symptom" effect="light">
+                      {{ symptom }}
+                    </el-tag>
+                    <el-tag v-if="structuredSymptoms?.duration" type="info" effect="plain">
+                      持续 {{ structuredSymptoms.duration }}
+                    </el-tag>
+                    <el-tag v-if="structuredSymptoms?.severity" type="warning" effect="plain">
+                      {{ structuredSymptoms.severity }}
+                    </el-tag>
+                  </div>
+                  <p v-else class="muted-copy">未提取到结构化症状，请以系统回答为准。</p>
+                  <p v-if="triageData?.matched_rule" class="matched-rule">
+                    <el-icon><InfoFilled /></el-icon>
+                    已命中风险规则：{{ triageData.matched_rule }}
+                  </p>
+                  <div v-if="triageData?.explanation || triageFactors.length" class="triage-explanation">
+                    <strong>判定依据</strong>
+                    <p>{{ triageData?.explanation || '以下依据来自本次安全规则或知识检索。' }}</p>
+                    <ul v-if="triageFactors.length">
+                      <li v-for="factor in triageFactors" :key="`${factor.kind}-${factor.reference}-${factor.label}`">
+                        <span>{{ factor.kind === 'rule' ? '安全规则' : '知识证据' }}</span>
+                        <strong>{{ factor.label }}</strong>
+                        <small v-if="factor.support">支持 {{ factor.support }}</small>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
 
-            <div class="safety-boundary">
-              <el-icon :size="19"><InfoFilled /></el-icon>
-              <div>
-                <strong>医疗安全声明</strong>
-                <p>
-                  {{ safetyBoundary || '本系统提供的是辅助分诊建议，不替代执业医生的诊断与治疗。如症状持续、加重或出现危险信号，请及时线下就医。' }}
-                </p>
+                <div class="safety-boundary">
+                  <el-icon :size="19"><InfoFilled /></el-icon>
+                  <div>
+                    <strong>医疗安全声明</strong>
+                    <p>
+                      {{ safetyBoundary || '本系统提供的是辅助分诊建议，不替代执业医生的诊断与治疗。如症状持续、加重或出现危险信号，请及时线下就医。' }}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
+            </details>
           </section>
 
           <aside class="evidence-panel">
@@ -1326,31 +1646,44 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="evidenceList.length" class="evidence-list">
-              <article v-for="(evidence, index) in evidenceList" :key="evidence.citation_id || evidence.chunk_id || index" class="evidence-item">
-                <div class="evidence-meta">
-                  <span :title="evidence.citation_id || ''">
-                    引用 {{ evidence.citation_id || String(index + 1).padStart(2, '0') }}
-                  </span>
-                  <el-tag v-if="formatEvidenceScore(evidence.score)" type="success" effect="plain" size="small">
-                    检索支持度 {{ formatEvidenceScore(evidence.score) }}
-                  </el-tag>
-                </div>
-                <strong>{{ evidence.source || '医学知识库资料' }}</strong>
-                <p>{{ evidence.quote || evidence.text }}</p>
-                <small v-if="evidence.department">{{ evidence.department }}</small>
-                <div class="evidence-technical">
-                  <code v-if="evidence.chunk_id">{{ evidence.chunk_id }}</code>
-                  <code v-if="evidence.index_version">索引 {{ evidence.index_version }}</code>
-                </div>
-              </article>
-            </div>
+            <details class="evidence-details" :open="isHighRisk">
+              <summary>
+                {{ evidenceList.length ? `查看 ${evidenceList.length} 条医学依据` : '查看依据说明' }}
+              </summary>
+              <div v-if="evidenceList.length" class="evidence-list">
+                <article v-for="(evidence, index) in evidenceList" :key="evidence.citation_id || evidence.chunk_id || index" class="evidence-item">
+                  <div class="evidence-meta">
+                    <span :title="evidence.citation_id || ''">
+                      引用 {{ evidence.citation_id || String(index + 1).padStart(2, '0') }}
+                    </span>
+                    <el-tag v-if="formatEvidenceScore(evidence.score)" type="success" effect="plain" size="small">
+                      检索支持度 {{ formatEvidenceScore(evidence.score) }}
+                    </el-tag>
+                  </div>
+                  <strong>{{ evidence.source || '医学知识库资料' }}</strong>
+                  <div class="evidence-context">
+                    <span>{{ formatEvidenceType(evidence.source_type) }}</span>
+                    <span v-if="evidence.published_date">更新于 {{ evidence.published_date }}</span>
+                  </div>
+                  <p class="evidence-explanation">与本次症状相关的医学资料摘录，供你核对，不代表疾病确诊。</p>
+                  <p>{{ evidence.quote || evidence.text }}</p>
+                  <small v-if="evidence.department">{{ evidence.department }}</small>
+                  <details class="evidence-technical-details">
+                    <summary>技术详情</summary>
+                    <div class="evidence-technical">
+                      <code v-if="evidence.chunk_id">{{ evidence.chunk_id }}</code>
+                      <code v-if="evidence.index_version">索引 {{ evidence.index_version }}</code>
+                    </div>
+                  </details>
+                </article>
+              </div>
 
-            <div v-else class="evidence-empty">
-              <el-icon :size="30"><Document /></el-icon>
-              <strong>{{ isEmergencyFastPath ? '安全快速通道未执行知识检索' : '暂无可展示依据' }}</strong>
-              <p>{{ isEmergencyFastPath ? '危险信号由本地安全规则直接判定，以缩短紧急响应时间。' : '系统不会在没有检索结果时生成引用来源。' }}</p>
-            </div>
+              <div v-else class="evidence-empty">
+                <el-icon :size="30"><Document /></el-icon>
+                <strong>{{ isEmergencyFastPath ? '安全快速通道未执行知识检索' : '暂无可展示依据' }}</strong>
+                <p>{{ isEmergencyFastPath ? '危险信号由本地安全规则直接判定，以缩短紧急响应时间。' : '系统不会在没有检索结果时生成引用来源。' }}</p>
+              </div>
+            </details>
 
             <div v-if="answerCitations.length" class="citation-summary">
               <strong>回答引用</strong>
@@ -1366,11 +1699,13 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="result-actions">
-          <span>
+          <div class="result-meta">
             生成时间：{{ resultCreatedAt?.toLocaleString('zh-CN') || '--' }}
-            · Trace {{ traceState.traceId || '--' }}
-            · {{ currentTraceElapsedMs }} ms
-          </span>
+            <details class="technical-details">
+              <summary>技术详情</summary>
+              <code>Trace {{ traceState.traceId || '--' }} · {{ currentTraceElapsedMs }} ms</code>
+            </details>
+          </div>
           <div>
             <el-button @click="router.push('/records')">
               <el-icon><Document /></el-icon>
@@ -1382,6 +1717,19 @@ onBeforeUnmount(() => {
             </el-button>
           </div>
         </div>
+
+        <section class="result-feedback" aria-labelledby="result-feedback-title">
+          <div>
+            <strong id="result-feedback-title">这次建议对你有帮助吗？</strong>
+            <small>你的反馈只用于改进问诊体验，不会改变本次分诊结果。</small>
+          </div>
+          <div v-if="!feedbackSubmitted" class="result-feedback-actions">
+            <el-button plain size="small" @click="submitResultFeedback('helpful')">有帮助</el-button>
+            <el-button plain size="small" @click="submitResultFeedback('symptoms_inaccurate')">症状描述不准确</el-button>
+            <el-button plain size="small" @click="submitResultFeedback('department_mismatch')">科室推荐不符合预期</el-button>
+          </div>
+          <span v-else class="feedback-thanks">已收到反馈，谢谢你的提醒。</span>
+        </section>
       </template>
     </template>
   </div>
@@ -2554,6 +2902,23 @@ onBeforeUnmount(() => {
 
 .pending-message p i:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+.streaming-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  border-radius: 1px;
+  background: currentColor;
+  vertical-align: -0.14em;
+  animation: streaming-caret 0.9s steps(1, end) infinite;
+}
+
+@keyframes streaming-caret {
+  50% {
+    opacity: 0;
+  }
 }
 
 @keyframes typing {
@@ -3854,6 +4219,7 @@ onBeforeUnmount(() => {
 
   .status-running .agent-state i,
   .pending-message p i,
+  .streaming-caret,
   .online-dot {
     animation: none;
   }
@@ -3861,6 +4227,588 @@ onBeforeUnmount(() => {
   .workflow-node,
   .workflow-icon {
     transition: none;
+  }
+}
+
+.draft-resume-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--primary-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--primary-soft);
+}
+
+.draft-resume-copy,
+.draft-resume-copy p {
+  min-width: 0;
+}
+
+.draft-resume-copy strong,
+.draft-resume-copy p {
+  display: block;
+}
+
+.draft-resume-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.draft-resume-copy p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.draft-resume-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.step-context {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -4px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.step-context strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.result-action-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0 4px;
+  padding: 16px;
+  border: 1px solid var(--primary-subtle);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+}
+
+.result-action-summary.is-high-risk {
+  border-color: var(--danger);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.result-action-summary__copy span,
+.result-action-summary__copy strong,
+.result-action-summary__copy small {
+  display: block;
+}
+
+.result-action-summary__copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.result-action-summary__copy strong {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.result-action-summary.is-high-risk .result-action-summary__copy strong {
+  color: var(--danger);
+}
+
+  .result-action-summary__copy small {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+.result-emergency-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  color: var(--danger);
+  background: var(--surface-elevated);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.result-emergency-link:hover {
+  color: var(--text-inverse);
+  background: var(--danger);
+}
+
+.result-details,
+.evidence-details {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.result-details > summary,
+.evidence-details > summary,
+.technical-details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.result-details > summary::-webkit-details-marker,
+.evidence-details > summary::-webkit-details-marker,
+.technical-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.result-details > summary,
+.evidence-details > summary {
+  padding: 14px 0;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.result-details > summary::after,
+.evidence-details > summary::after,
+.technical-details > summary::after {
+  display: inline-block;
+  margin-left: 6px;
+  content: '▾';
+  transition: transform .16s ease;
+}
+
+.result-details[open] > summary::after,
+.evidence-details[open] > summary::after,
+.technical-details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.result-details__body {
+  padding-bottom: 4px;
+}
+
+.result-details__body .result-section:first-child,
+.result-details__body .result-visualization-section {
+  padding-top: 8px;
+}
+
+.technical-details {
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.technical-details > summary {
+  display: inline-block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.technical-details > code {
+  display: block;
+  margin-top: 5px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  font-size: 10px;
+}
+
+.followup-prompt {
+  display: grid;
+  gap: 4px;
+}
+
+.followup-kicker {
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.followup-prompt strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.followup-prompt small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.followup-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.followup-suggestions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  background: var(--surface-elevated);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.followup-suggestions button:hover,
+.followup-suggestions button:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+  outline: none;
+}
+
+.followup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.journey-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.journey-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 11px;
+}
+
+.journey-steps li > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-elevated);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.journey-steps li strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journey-steps li.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.journey-steps li.is-active > span,
+.journey-steps li.is-complete > span {
+  background: var(--primary);
+  color: var(--text-inverse);
+}
+
+.journey-steps li.is-complete {
+  color: var(--text-secondary);
+}
+
+.imported-description-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -2px 0 16px;
+  padding: 9px 11px;
+  border: 1px solid var(--primary-subtle);
+  border-radius: var(--radius-md);
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-size: 12px;
+}
+
+.field-error {
+  margin: 7px 0 0;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.symptom-options.has-error :deep(.el-checkbox.is-bordered) {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border-default));
+}
+
+.friendly-progress-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.friendly-progress-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 12px;
+}
+
+.friendly-progress-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: var(--surface-elevated);
+}
+
+.friendly-progress-icon i {
+  width: 7px;
+  height: 7px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.friendly-progress-item strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.friendly-progress-item small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.friendly-progress-item.is-running {
+  border-color: var(--primary-subtle);
+  background: var(--primary-soft);
+}
+
+.friendly-progress-item.is-running .friendly-progress-icon {
+  color: var(--primary);
+}
+
+.friendly-progress-item.is-running .friendly-progress-icon i {
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.friendly-progress-item.is-done,
+.friendly-progress-item.is-done .friendly-progress-icon {
+  color: var(--success);
+}
+
+.friendly-progress-item.is-done strong {
+  color: var(--text-secondary);
+}
+
+.friendly-progress-item.is-error,
+.friendly-progress-item.is-error .friendly-progress-icon,
+.friendly-progress-item.is-error strong {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.runtime-details {
+  margin-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.runtime-details > summary {
+  padding: 11px 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  list-style: none;
+}
+
+.runtime-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-details > summary::after {
+  display: inline-block;
+  margin-left: 6px;
+  content: '▾';
+  transition: transform .16s ease;
+}
+
+.runtime-details[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.runtime-details .trace-meta-bar {
+  margin-top: 0;
+}
+
+.evidence-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.evidence-explanation {
+  color: var(--text-secondary) !important;
+  font-size: 11px !important;
+}
+
+.evidence-technical-details {
+  margin-top: 7px;
+}
+
+.evidence-technical-details > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.evidence-technical-details > summary::before {
+  content: '＋ ';
+}
+
+.evidence-technical-details[open] > summary::before {
+  content: '－ ';
+}
+
+.result-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 13px 2px;
+  color: var(--text-secondary);
+}
+
+.result-feedback strong,
+.result-feedback small {
+  display: block;
+}
+
+.result-feedback strong {
+  font-size: 12px;
+}
+
+.result-feedback small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.result-feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.result-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.feedback-thanks {
+  flex: 0 0 auto;
+  color: var(--success);
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .draft-resume-banner,
+  .result-action-summary,
+  .result-feedback {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .draft-resume-actions,
+  .result-emergency-link {
+    width: 100%;
+  }
+
+  .draft-resume-actions > .el-button,
+  .result-emergency-link {
+    justify-content: center;
+    flex: 1;
+  }
+
+  .step-context {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .journey-steps {
+    gap: 5px;
+  }
+
+  .journey-steps li {
+    justify-content: center;
+    padding-inline: 5px;
+  }
+
+  .journey-steps li > span {
+    width: 20px;
+    height: 20px;
+  }
+
+  .journey-steps li strong {
+    font-size: 10px;
+  }
+
+  .form-actions.intake-submit-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    margin: 12px -16px -20px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border-default);
+    background: color-mix(in srgb, var(--glass-surface) 94%, transparent);
+    box-shadow: 0 -8px 18px color-mix(in srgb, var(--shadow-color, #101828) 10%, transparent);
+    backdrop-filter: blur(16px);
+  }
+
+  .result-feedback-actions {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .result-feedback-actions .el-button {
+    flex: 1 1 30%;
+    min-height: 34px;
+    margin: 0;
+  }
+
+  .result-metrics {
+    grid-template-columns: 1fr;
   }
 }
 </style>

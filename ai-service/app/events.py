@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 ConsultIntent = Literal["medical_consult", "emergency"]
 ConsultPhase = Literal[
@@ -20,6 +20,20 @@ ConsultPhase = Literal[
     "failed",
 ]
 HistoryMode = Literal["full", "summary"]
+EventType = Literal["node", "answer_delta", "error", "done"]
+
+
+class AnswerDeltaData(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    delta: StrictStr = Field(min_length=1, max_length=512)
+
+    @field_validator("delta")
+    @classmethod
+    def reject_blank_delta(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("answer delta must not be blank")
+        return value
 
 
 class ConsultEventState(BaseModel):
@@ -54,7 +68,7 @@ class EventEmitter:
 
     def emit(
         self,
-        event_type: str,
+        event_type: EventType | str,
         *,
         phase: ConsultPhase,
         status: str,
@@ -63,6 +77,12 @@ class EventEmitter:
         elapsed_ms: int = 0,
         data: dict | None = None,
     ) -> dict:
+        if event_type not in {"node", "answer_delta", "error", "done"}:
+            raise ValueError(f"unsupported event type: {event_type}")
+        if event_type == "answer_delta":
+            if status != "streaming" or phase != "composing":
+                raise ValueError("answer_delta must be a composing stream event")
+            data = AnswerDeltaData.model_validate(data or {}).model_dump()
         self._sequence += 1
         event = {
             "protocol_version": "1.0",

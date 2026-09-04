@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.medpilot.user.User;
 import com.medpilot.user.UserRepository;
 import com.medpilot.health.HealthProfileContextService;
+import com.medpilot.monitor.LiveTraceRegistry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -30,6 +32,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -39,6 +42,8 @@ public class ConsultController {
     private final AiConsultClient aiClient;
     private final SessionOwnershipService ownership;
     private final ConsultationPersistenceService persistence;
+    private final ConsultationMessageService messages;
+    private final LiveTraceRegistry liveTraces;
     private final UserRepository users;
     private final HealthProfileContextService healthProfiles;
     private final ObjectMapper mapper;
@@ -49,19 +54,35 @@ public class ConsultController {
     @Value("${medpilot.ai.retry.backoff-ms:100}")
     private long retryBackoffMs = 100L;
 
+    @Autowired
     public ConsultController(
             AiConsultClient aiClient,
             SessionOwnershipService ownership,
             ConsultationPersistenceService persistence,
+            ConsultationMessageService messages,
+            LiveTraceRegistry liveTraces,
             UserRepository users,
             HealthProfileContextService healthProfiles,
             ObjectMapper mapper) {
         this.aiClient = aiClient;
         this.ownership = ownership;
         this.persistence = persistence;
+        this.messages = messages;
+        this.liveTraces = liveTraces;
         this.users = users;
         this.healthProfiles = healthProfiles;
         this.mapper = mapper;
+    }
+
+    /** Kept for isolated legacy tests; the application always uses the full constructor. */
+    ConsultController(
+            AiConsultClient aiClient,
+            SessionOwnershipService ownership,
+            ConsultationPersistenceService persistence,
+            UserRepository users,
+            HealthProfileContextService healthProfiles,
+            ObjectMapper mapper) {
+        this(aiClient, ownership, persistence, null, null, users, healthProfiles, mapper);
     }
 
     @PostMapping(value = "/consult", produces = MediaType.APPLICATION_NDJSON_VALUE)
@@ -72,24 +93,35 @@ public class ConsultController {
                 .orElseThrow(() -> new SecurityException("authenticated user not found"));
         ownership.claim(request.sessionId(), user.getId());
         Map<String, String> healthContext = healthProfiles.resolveForUser(user.getId());
+        List<AiConsultClient.HistoryMessage> history = messages == null
+                ? List.of()
+                : messages.historyFor(user.getId(), request.sessionId());
+        if (messages != null) {
+            messages.appendUser(user.getId(), request.sessionId(), request.text());
+        }
 
         ConsultationEventAccumulator accumulator =
                 new ConsultationEventAccumulator(mapper, request.sessionId());
         String requestJson = writeRequest(request);
+        LiveTraceRegistry.Handle live = liveTraces == null
+                ? null
+                : liveTraces.start(request.sessionId(), user.getId());
 
-        Flux<String> upstream = retryBeforeFirstEvent(
-                request.text(), request.sessionId(), healthContext).cache();
-        Flux<String> responseBody = processStream(
-                upstream, user.getId(), request.text(), requestJson, accumulator);
-
-        return upstream.next()
-                .switchIfEmpty(Mono.error(new AiServiceUnavailableException()))
-                .doOnError(error -> persistFailureSafely(
-                        user.getId(), accumulator, initialFailureCode(error)))
-                .onErrorMap(this::mapInitialUpstreamFailure)
-                .thenReturn(ResponseEntity.ok()
+        return openWithRetry(
+                        request.text(), request.sessionId(), healthContext, history)
+                .map(upstream -> ResponseEntity.ok()
                         .contentType(MediaType.APPLICATION_NDJSON)
-                        .body(responseBody));
+                        .body(processStream(
+                                upstream,
+                                user.getId(),
+                                request.text(),
+                                requestJson,
+                                accumulator,
+                                live)))
+                .doOnError(error -> persistInitialFailure(
+                        user.getId(), accumulator, live, initialFailureCode(error)))
+                .onErrorMap(this::mapInitialUpstreamFailure)
+                .doOnCancel(() -> persistCancellationSafely(user.getId(), accumulator, live));
     }
 
     private Flux<String> processStream(
@@ -97,34 +129,44 @@ public class ConsultController {
             Long userId,
             String requestText,
             String requestJson,
-            ConsultationEventAccumulator accumulator) {
-        AtomicBoolean persisted = new AtomicBoolean(false);
-        return upstream
+            ConsultationEventAccumulator accumulator,
+            LiveTraceRegistry.Handle live) {
+        AtomicBoolean terminated = new AtomicBoolean(false);
+        AtomicBoolean subscribed = new AtomicBoolean(false);
+        return Flux.defer(() -> {
+            if (!subscribed.compareAndSet(false, true)) {
+                return Flux.error(new IllegalStateException(
+                        "consultation response body can only be subscribed once"));
+            }
+            return upstream
                 .map(line -> {
                     try {
                         accumulator.accept(line);
                     } catch (RuntimeException error) {
                         throw new StreamFailure("INVALID_UPSTREAM_EVENT", error);
                     }
+                    publishLive(live, accumulator.traceId(), line);
                     if (accumulator.isTerminalError()) {
-                        persistFailureSafely(
-                                userId,
-                                accumulator,
-                                accumulator.failureCode());
-                        persisted.set(true);
-                    } else if (accumulator.isDone()) {
+                        if (terminated.compareAndSet(false, true)) {
+                            persistFailureSafely(
+                                    userId, accumulator, live, accumulator.failureCode());
+                        }
+                    } else if (accumulator.isDone()
+                            && terminated.compareAndSet(false, true)) {
                         try {
                             persistence.persist(
                                     userId, requestText, requestJson, accumulator.finish());
-                            persisted.set(true);
+                            completeLive(live, accumulator.traceId());
                         } catch (RuntimeException error) {
+                            persistFailureSafely(
+                                    userId, accumulator, live, "PERSISTENCE_ERROR");
                             throw new StreamFailure("PERSISTENCE_ERROR", error);
                         }
                     }
                     return line.stripTrailing() + "\n";
                 })
                 .concatWith(Mono.defer(() -> {
-                    if (persisted.get() || accumulator.isTerminalError()) {
+                    if (terminated.get() || accumulator.isTerminalError()) {
                         return Mono.empty();
                     }
                     return Mono.error(new StreamFailure(
@@ -135,33 +177,48 @@ public class ConsultController {
                     String code = error instanceof StreamFailure failure
                             ? failure.code
                             : "UPSTREAM_STREAM_ERROR";
-                    if (!persisted.get()) {
-                        persistFailureSafely(userId, accumulator, code);
-                        persisted.set(true);
+                    if (terminated.compareAndSet(false, true)) {
+                        persistFailureSafely(userId, accumulator, live, code);
                     }
                     return Flux.just(accumulator.failureEvent(code) + "\n");
+                })
+                .doFinally(signal -> {
+                    if (signal == reactor.core.publisher.SignalType.CANCEL
+                            && terminated.compareAndSet(false, true)) {
+                        persistCancellationSafely(userId, accumulator, live);
+                    }
                 });
+        });
     }
 
-    /** Retry only failures that happen before the first event reaches the client. */
-    private Flux<String> retryBeforeFirstEvent(
+    /** Opening resolves upstream HTTP status without subscribing to the streaming body. */
+    private Mono<Flux<String>> openWithRetry(
             String text,
             String sessionId,
-            Map<String, String> healthContext) {
-        AtomicBoolean emitted = new AtomicBoolean(false);
+            Map<String, String> healthContext,
+            List<AiConsultClient.HistoryMessage> history) {
         Map<String, String> stableContext = healthContext == null
                 ? Map.of()
                 : Map.copyOf(healthContext);
-        Supplier<Flux<String>> source = () -> aiClient.consult(text, sessionId, stableContext)
-                .doOnNext(ignored -> emitted.set(true));
-        Flux<String> deferred = Flux.defer(source);
+        List<AiConsultClient.HistoryMessage> stableHistory = history == null
+                ? List.of()
+                : List.copyOf(history);
+        Supplier<Mono<Flux<String>>> source = () -> {
+            Mono<Flux<String>> opened = aiClient.openConsult(
+                    text, sessionId, stableContext, stableHistory);
+            // Mockito and legacy adapters can return null for the new default hook.
+            return opened != null
+                    ? opened
+                    : Mono.just(aiClient.consult(text, sessionId, stableContext));
+        };
+        Mono<Flux<String>> deferred = Mono.defer(source);
         int retries = Math.max(0, maxAiRetries);
         if (retries == 0) {
             return deferred;
         }
         Duration backoff = Duration.ofMillis(Math.max(1L, retryBackoffMs));
         return deferred.retryWhen(Retry.backoff(retries, backoff)
-                .filter(error -> !emitted.get() && isRetryableBeforeFirstEvent(error))
+                .filter(this::isRetryableBeforeFirstEvent)
                 .onRetryExhaustedThrow((spec, signal) -> signal.failure()));
     }
 
@@ -197,12 +254,52 @@ public class ConsultController {
     private void persistFailureSafely(
             Long userId,
             ConsultationEventAccumulator accumulator,
+            LiveTraceRegistry.Handle live,
             String code) {
+        ConsultationEventAccumulator.Snapshot snapshot = accumulator.failureSnapshot(code);
         try {
-            persistence.persistFailure(userId, accumulator.failureSnapshot(code));
+            persistence.persistFailure(userId, snapshot);
         } catch (RuntimeException ignored) {
             // A database outage must not hide the actionable upstream error from the client.
         }
+        failLive(live, snapshot.traceId(), code);
+    }
+
+    private void persistInitialFailure(
+            Long userId,
+            ConsultationEventAccumulator accumulator,
+            LiveTraceRegistry.Handle live,
+            String code) {
+        persistFailureSafely(userId, accumulator, live, code);
+    }
+
+    private void persistCancellationSafely(
+            Long userId,
+            ConsultationEventAccumulator accumulator,
+            LiveTraceRegistry.Handle live) {
+        ConsultationEventAccumulator.Snapshot snapshot = accumulator.cancelledSnapshot();
+        try {
+            persistence.persistCancellation(userId, snapshot);
+        } catch (RuntimeException ignored) {
+            // Cancellation must still release the upstream connection when persistence is down.
+        }
+        cancelLive(live, snapshot.traceId());
+    }
+
+    private void publishLive(LiveTraceRegistry.Handle live, String traceId, String line) {
+        if (liveTraces != null && live != null) liveTraces.publish(live, traceId, line);
+    }
+
+    private void completeLive(LiveTraceRegistry.Handle live, String traceId) {
+        if (liveTraces != null && live != null) liveTraces.complete(live, traceId);
+    }
+
+    private void failLive(LiveTraceRegistry.Handle live, String traceId, String code) {
+        if (liveTraces != null && live != null) liveTraces.fail(live, traceId, code);
+    }
+
+    private void cancelLive(LiveTraceRegistry.Handle live, String traceId) {
+        if (liveTraces != null && live != null) liveTraces.cancel(live, traceId);
     }
 
     private RuntimeException mapInitialUpstreamFailure(Throwable error) {

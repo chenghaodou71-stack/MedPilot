@@ -1,15 +1,16 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Download, RefreshCw, ShieldCheck } from 'lucide-vue-next'
+import { Download, Filter, RefreshCw, RotateCcw } from 'lucide-vue-next'
 import client from '../api/client'
+import { buildAuditLogParams, emptyAuditFilters } from '../lib/auditFilters'
 
 const rows = ref([])
 const loading = ref(false)
 const exporting = ref(false)
 const error = ref('')
 const actor = ref('')
-const status = ref('')
+const statusGroup = ref('')
 const page = ref(0)
 const size = ref(30)
 const total = ref(0)
@@ -26,7 +27,12 @@ async function loadLogs() {
   error.value = ''
   try {
     const response = await client.get('/audit/logs', {
-      params: { actor: actor.value.trim() || undefined, status: status.value || undefined, page: page.value, size: size.value },
+      params: buildAuditLogParams({
+        actor: actor.value,
+        statusGroup: statusGroup.value,
+        page: page.value,
+        size: size.value,
+      }),
     })
     rows.value = Array.isArray(payloadOf(response)) ? payloadOf(response) : []
     total.value = Number(metaOf(response).total) || 0
@@ -58,7 +64,14 @@ async function exportLogs() {
 }
 
 function changePage(nextPage) { page.value = nextPage - 1; loadLogs() }
-function resetFilters() { actor.value = ''; status.value = ''; page.value = 0; loadLogs() }
+function applyFilters() { page.value = 0; loadLogs() }
+function resetFilters() {
+  const reset = emptyAuditFilters()
+  actor.value = reset.actor
+  statusGroup.value = reset.statusGroup
+  page.value = reset.page
+  loadLogs()
+}
 
 onMounted(loadLogs)
 </script>
@@ -81,13 +94,14 @@ onMounted(loadLogs)
 
     <section class="aud-panel">
       <div class="aud-filters">
-        <el-input v-model="actor" clearable placeholder="按操作者筛选" aria-label="按操作者筛选" @keyup.enter="resetFilters" />
-        <el-select v-model="status" clearable placeholder="响应状态" aria-label="按响应状态筛选" @change="resetFilters">
-          <el-option label="成功（2xx/3xx）" value="200" />
-          <el-option label="客户端错误（4xx）" value="400" />
-          <el-option label="服务端错误（5xx）" value="500" />
+        <el-input v-model="actor" clearable placeholder="按操作者筛选" aria-label="按操作者筛选" @keyup.enter="applyFilters" />
+        <el-select v-model="statusGroup" clearable placeholder="响应状态" aria-label="按响应状态筛选">
+          <el-option label="成功（2xx/3xx）" value="success" />
+          <el-option label="客户端错误（4xx）" value="client_error" />
+          <el-option label="服务端错误（5xx）" value="server_error" />
         </el-select>
-        <el-button type="primary" @click="resetFilters"><ShieldCheck :size="16" />应用筛选</el-button>
+        <el-button type="primary" @click="applyFilters"><Filter :size="16" />应用筛选</el-button>
+        <el-button plain @click="resetFilters"><RotateCcw :size="16" />重置</el-button>
       </div>
       <el-table v-loading="loading" :data="rows" row-key="eventId" class="aud-table">
         <el-table-column label="时间" min-width="170"><template #default="scope">{{ formatTime(scope.row.createdAt) }}</template></el-table-column>

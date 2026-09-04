@@ -34,6 +34,7 @@ class Chunk:
     department: str
     source: str
     text: str
+    source_type: str = "text"
     institution: str = ""
     title: str = ""
     url: str = ""
@@ -60,6 +61,7 @@ def split_document(doc: dict[str, str]) -> list[Chunk]:
             department=doc["department"],
             source=doc["source"],
             text=text,
+            source_type=doc.get("source_type", "text"),
             institution=doc.get("institution", ""),
             title=doc.get("title", ""),
             url=doc.get("url", ""),

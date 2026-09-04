@@ -47,6 +47,9 @@ public final class ConsultationEventAccumulator {
     private String triageFactorsJson = "[]";
     private String answer;
     private ArrayNode answerCitations;
+    private JsonNode composedAnswer;
+    private final StringBuilder answerDeltas = new StringBuilder();
+    private boolean sawAnswerDelta;
     private String failureCode;
     private long totalDurationMs;
 
@@ -56,7 +59,7 @@ public final class ConsultationEventAccumulator {
         this.evidenceCitations = mapper.createArrayNode();
     }
 
-    public void accept(String line) {
+    public synchronized void accept(String line) {
         if (sawDone) {
             throw new IllegalArgumentException("event received after done");
         }
@@ -74,6 +77,7 @@ public final class ConsultationEventAccumulator {
         }
         switch (type) {
             case "node" -> acceptNode(event);
+            case "answer_delta" -> acceptAnswerDelta(event);
             case "done" -> acceptDone(event);
             case "error" -> {
                 sawError = true;
@@ -90,7 +94,7 @@ public final class ConsultationEventAccumulator {
         expectedSequence++;
     }
 
-    public Snapshot finish() {
+    public synchronized Snapshot finish() {
         if (!sawDone) {
             throw new IllegalStateException("trace has no valid done event");
         }
@@ -102,7 +106,7 @@ public final class ConsultationEventAccumulator {
         }
 
         ArrayNode citations = answerCitations != null ? answerCitations : evidenceCitations;
-        boolean createRecord = answer != null && !answer.isBlank();
+        boolean createRecord = answer != null && !answer.isBlank() && !followupPending;
         return new Snapshot(
                 traceId,
                 expectedSessionId,
@@ -128,11 +132,11 @@ public final class ConsultationEventAccumulator {
     }
 
     /** Build an auditable failed snapshot even when the stream has no done event. */
-    public Snapshot failureSnapshot(String code) {
+    public synchronized Snapshot failureSnapshot(String code) {
         String normalizedCode = code == null || code.isBlank() ? "UPSTREAM_STREAM_ERROR" : code;
         String eventJson = writeFailureEvents(normalizedCode);
         return new Snapshot(
-                traceId != null ? traceId : UUID.randomUUID().toString(),
+                ensureTraceId(),
                 expectedSessionId,
                 symptoms,
                 department,
@@ -155,20 +159,51 @@ public final class ConsultationEventAccumulator {
         );
     }
 
-    public String failureCode() {
+    public synchronized String failureCode() {
         return failureCode;
     }
 
-    public boolean isDone() {
+    public synchronized boolean isDone() {
         return sawDone;
     }
 
-    public boolean isTerminalError() {
+    public synchronized boolean isTerminalError() {
         return sawTerminalError;
     }
 
-    public String failureEvent(String code) {
-        String eventTraceId = traceId != null ? traceId : UUID.randomUUID().toString();
+    public synchronized String traceId() {
+        return traceId;
+    }
+
+    /** Build a non-success terminal snapshot when the downstream HTTP client disconnects. */
+    public synchronized Snapshot cancelledSnapshot() {
+        String code = "CLIENT_CANCELLED";
+        return new Snapshot(
+                ensureTraceId(),
+                expectedSessionId,
+                symptoms,
+                department,
+                riskLevel,
+                confidence,
+                urgency,
+                matchedRule,
+                null,
+                write(evidenceCitations),
+                writeFailureEvents(code),
+                followupPending,
+                "cancelled",
+                false,
+                supportScore,
+                explanation,
+                triageFactorsJson,
+                abstained,
+                code,
+                totalDurationMs
+        );
+    }
+
+    public synchronized String failureEvent(String code) {
+        String eventTraceId = ensureTraceId();
         Map<String, Object> state = new HashMap<>();
         state.put("intent", "medical_consult");
         state.put("phase", "failed");
@@ -283,8 +318,49 @@ public final class ConsultationEventAccumulator {
         if (!Set.of("completed", "escalated").contains(phase)) {
             throw new IllegalArgumentException("done phase must be completed or escalated");
         }
+        JsonNode doneAnswer = event.path("data").path("answer");
+        if (answer != null && !followupPending && !doneAnswer.isObject()) {
+            throw new IllegalArgumentException("done answer is required for a final answer");
+        }
+        if (doneAnswer.isObject()) {
+            if (composedAnswer == null || !composedAnswer.equals(doneAnswer)) {
+                throw new IllegalArgumentException("done answer does not match compose answer");
+            }
+        }
+        if (answer != null && !followupPending && !sawAnswerDelta) {
+            throw new IllegalArgumentException("validated answer requires answer_delta events");
+        }
+        if (sawAnswerDelta && (answer == null || !answer.equals(answerDeltas.toString()))) {
+            throw new IllegalArgumentException("answer_delta content does not match validated answer");
+        }
         sawDone = true;
         terminalPhase = phase;
+    }
+
+    private void acceptAnswerDelta(JsonNode event) {
+        if (!"completed".equals(nodeStates.get("compose")) || answer == null) {
+            throw new IllegalArgumentException(
+                    "answer_delta requires a validated compose completion");
+        }
+        if (!"streaming".equals(requiredText(event, "status"))) {
+            throw new IllegalArgumentException("answer_delta status must be streaming");
+        }
+        if (!"composing".equals(requiredText(event.path("state"), "phase"))) {
+            throw new IllegalArgumentException("answer_delta phase must be composing");
+        }
+        JsonNode data = event.path("data");
+        if (data.size() != 1 || !data.has("delta")) {
+            throw new IllegalArgumentException("answer_delta data must contain only delta");
+        }
+        JsonNode value = data.get("delta");
+        if (value == null || !value.isTextual() || value.asText().isEmpty()) {
+            throw new IllegalArgumentException("answer_delta data.delta must be a non-empty string");
+        }
+        sawAnswerDelta = true;
+        answerDeltas.append(value.asText());
+        if (!answer.startsWith(answerDeltas.toString())) {
+            throw new IllegalArgumentException("answer_delta content diverges from validated answer");
+        }
     }
 
     private void collectNodeData(String node, JsonNode data) {
@@ -317,13 +393,17 @@ public final class ConsultationEventAccumulator {
             }
             case "compose" -> {
                 JsonNode composed = data.path("answer");
+                composedAnswer = composed.isObject() ? composed.deepCopy() : null;
                 answer = textOrNull(composed.get("text"));
                 if (composed.path("citations").isArray()) {
                     answerCitations = mapper.createArrayNode();
                     copyCitations(composed.path("citations"), answerCitations);
                 }
             }
-            case "ask_followup" -> followupPending = true;
+            case "ask_followup" -> {
+                followupPending = true;
+                answer = textOrNull(data.path("followup").get("question"));
+            }
             default -> {
                 // Unknown nodes remain in the event snapshot for forward compatibility.
             }
@@ -364,6 +444,11 @@ public final class ConsultationEventAccumulator {
             }
         }
         return write(failedEvents);
+    }
+
+    private String ensureTraceId() {
+        if (traceId == null) traceId = UUID.randomUUID().toString();
+        return traceId;
     }
 
     private static void requireEnum(JsonNode parent, String field, Set<String> allowed) {

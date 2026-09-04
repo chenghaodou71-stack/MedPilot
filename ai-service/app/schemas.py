@@ -27,6 +27,7 @@ class RankedEvidence(BaseModel):
     chunk_id: str
     department: str
     source: str
+    source_type: str = ""
     quote: str
     score: float
     index_version: str

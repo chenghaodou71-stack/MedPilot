@@ -5,6 +5,7 @@ import json
 import re
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 import faiss
 import numpy as np
@@ -14,6 +15,26 @@ from app.rag.index import INDEX_DIR, load_index, save_index
 
 
 ALLOWED_DEPARTMENTS = {"呼吸内科", "消化内科", "心血管内科", "皮肤科"}
+OFFICIAL_SOURCE_HOSTS = {
+    "www.who.int",
+    "www.nhlbi.nih.gov",
+    "www.niddk.nih.gov",
+    "www.niams.nih.gov",
+    "medlineplus.gov",
+    "www.nhs.uk",
+}
+OFFICIAL_INSTITUTION_HOSTS = {
+    "World Health Organization": {"www.who.int"},
+    "National Heart, Lung, and Blood Institute": {"www.nhlbi.nih.gov"},
+    "National Institute of Diabetes and Digestive and Kidney Diseases": {
+        "www.niddk.nih.gov",
+    },
+    "National Institute of Arthritis and Musculoskeletal and Skin Diseases": {
+        "www.niams.nih.gov",
+    },
+    "U.S. National Library of Medicine": {"medlineplus.gov"},
+    "National Health Service": {"www.nhs.uk"},
+}
 REQUIRED_METADATA = {
     "institution",
     "title",
@@ -44,6 +65,19 @@ def test_builtin_corpus_is_scoped_traceable_and_non_prescriptive():
         assert document["license"].strip()
         assert document["review_status"] == "approved"
         assert not UNSAFE_CONTENT.search(document["text"])
+
+
+def test_builtin_corpus_has_at_least_one_hundred_unique_official_documents():
+    assert len(CORPUS) >= 100
+    assert len({document["doc_id"] for document in CORPUS}) == len(CORPUS)
+    assert {
+        urlparse(document["url"]).netloc
+        for document in CORPUS
+    } <= OFFICIAL_SOURCE_HOSTS
+    for document in CORPUS:
+        assert urlparse(document["url"]).netloc in OFFICIAL_INSTITUTION_HOSTS[
+            document["institution"]
+        ]
 
 
 def test_delivered_documents_and_index_match_the_governed_corpus():

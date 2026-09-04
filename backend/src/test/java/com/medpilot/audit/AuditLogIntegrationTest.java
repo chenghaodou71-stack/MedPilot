@@ -11,6 +11,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -71,6 +73,59 @@ class AuditLogIntegrationTest {
                         org.hamcrest.Matchers.containsString("private allergy"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString(",user,"))));
+    }
+
+    @Test
+    void statusGroupFiltersUseHttpStatusRanges() throws Exception {
+        saveAuditEvent(204);
+        saveAuditEvent(302);
+        saveAuditEvent(404);
+        saveAuditEvent(503);
+
+        mvc.perform(get("/api/audit/logs")
+                        .cookie(admin)
+                        .param("statusGroup", "success"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.meta.total").value(2))
+                .andExpect(jsonPath("$.data[0].status").value(org.hamcrest.Matchers.anyOf(
+                        org.hamcrest.Matchers.is(204), org.hamcrest.Matchers.is(302))))
+                .andExpect(jsonPath("$.data[1].status").value(org.hamcrest.Matchers.anyOf(
+                        org.hamcrest.Matchers.is(204), org.hamcrest.Matchers.is(302))));
+
+        mvc.perform(get("/api/audit/logs")
+                        .cookie(admin)
+                        .param("statusGroup", "client_error"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.meta.total").value(1))
+                .andExpect(jsonPath("$.data[0].status").value(404));
+
+        mvc.perform(get("/api/audit/logs")
+                        .cookie(admin)
+                        .param("statusGroup", "server_error"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.meta.total").value(1))
+                .andExpect(jsonPath("$.data[0].status").value(503));
+    }
+
+    @Test
+    void statusGroupRejectsUnknownValuesAndConflictingExactStatus() throws Exception {
+        mvc.perform(get("/api/audit/logs")
+                        .cookie(admin)
+                        .param("statusGroup", "unknown"))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(get("/api/audit/logs")
+                        .cookie(admin)
+                        .param("status", "200")
+                        .param("statusGroup", "success"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private void saveAuditEvent(int status) {
+        logs.save(new AuditLog(
+                UUID.randomUUID().toString(), "range-tester", "ROLE_ADMIN",
+                "GET", "/api/range-test", status, status < 400,
+                null, "", 1));
     }
 
     private Cookie login(String username, String password) throws Exception {

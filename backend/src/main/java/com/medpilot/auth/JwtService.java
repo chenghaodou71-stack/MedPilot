@@ -32,9 +32,13 @@ public class JwtService {
     }
 
     public String generate(String username, Role role) {
+        return generate(username, role, 0L);
+    }
+
+    public String generate(String username, Role role, long tokenVersion) {
         return Jwts.builder()
                 .subject(username)
-                .claims(Map.of("role", role.name()))
+                .claims(Map.of("role", role.name(), "ver", tokenVersion))
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expirationMs))
                 .signWith(key)
@@ -47,6 +51,11 @@ public class JwtService {
 
     public String extractRole(String token) {
         return (String) parse(token).get("role");
+    }
+
+    public long extractTokenVersion(String token) {
+        Number value = parse(token).get("ver", Number.class);
+        return value == null ? 0L : value.longValue();
     }
 
     private io.jsonwebtoken.Claims parse(String token) {

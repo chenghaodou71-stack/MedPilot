@@ -13,6 +13,7 @@ from app.api import monitor_routes
 from app.api.monitor_routes import TraceRequest, _trace_stream
 from app.runtime import InferenceGate
 from app.session import SessionStore
+from app.shared_state import SharedStateUnavailable
 
 
 async def _completed_stream(*_args, **_kwargs):
@@ -58,6 +59,39 @@ async def test_consult_returns_429_when_inference_capacity_is_full(monkeypatch):
         assert exc_info.value.status_code == 429
     finally:
         _ = [chunk async for chunk in first.body_iterator]
+
+
+@pytest.mark.unit
+async def test_consult_returns_503_when_required_shared_state_is_unavailable(monkeypatch):
+    class UnavailableGate:
+        request_timeout = 1
+
+        async def acquire(self):
+            raise SharedStateUnavailable("redis unavailable")
+
+    monkeypatch.setattr(routes, "store", SessionStore())
+    monkeypatch.setattr(routes, "inference_gate", UnavailableGate(), raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await routes.consult(ConsultRequest(text="第一条"))
+
+    assert exc_info.value.status_code == 503
+
+
+@pytest.mark.unit
+async def test_monitor_trace_returns_503_when_required_shared_state_is_unavailable(monkeypatch):
+    class UnavailableGate:
+        request_timeout = 1
+
+        async def acquire(self):
+            raise SharedStateUnavailable("redis unavailable")
+
+    monkeypatch.setattr(monitor_routes, "inference_gate", UnavailableGate(), raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await monitor_routes.trace(TraceRequest(text="第一条"))
+
+    assert exc_info.value.status_code == 503
 
 
 @pytest.mark.unit

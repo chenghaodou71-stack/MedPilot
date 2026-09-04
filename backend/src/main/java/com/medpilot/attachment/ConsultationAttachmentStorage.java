@@ -108,7 +108,12 @@ public class ConsultationAttachmentStorage {
 
     public void delete(String storageKey) {
         Path path = resolveStorageKey(storageKey);
-        deleteQuietly(path);
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException exception) {
+            throw new AttachmentStorageException(
+                    "attachment could not be deleted", exception);
+        }
     }
 
     Path resolveStorageKey(String storageKey) {

@@ -1,6 +1,7 @@
 package com.medpilot.health;
 
 import com.medpilot.common.ApiResponse;
+import com.medpilot.runtime.RedisRuntimeState;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -13,8 +14,32 @@ import reactor.core.publisher.Mono;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class HealthControllerTest {
+
+    @Test
+    void requiredRedisFailureMakesBackendHealthDegraded() {
+        RedisRuntimeState sharedState = mock(RedisRuntimeState.class);
+        when(sharedState.isRequired()).thenReturn(true);
+        when(sharedState.shouldUseSharedState()).thenReturn(true);
+        when(sharedState.isEnabled()).thenReturn(true);
+        when(sharedState.isAvailable()).thenReturn(false);
+
+        ResponseEntity<ApiResponse<Map<String, Object>>> response =
+                new HealthController(WebClient.builder().build(), sharedState).health();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().success()).isFalse();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = response.getBody().data();
+        assertThat(data).containsKey("shared_state");
+        Map<?, ?> state = (Map<?, ?>) data.get("shared_state");
+        assertThat(state.get("required")).isEqualTo(true);
+        assertThat(state.get("ok")).isEqualTo(false);
+    }
 
     @Test
     void preservesReadinessStatusAndComponentDetails() {

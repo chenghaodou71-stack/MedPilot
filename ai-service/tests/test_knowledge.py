@@ -74,8 +74,9 @@ class TestIngest:
         assert resp.status_code == 201
         body = resp.json()
         assert body["doc_id"] == "test-doc"
-        assert body["chunks"] == 3
-        assert body["version"] == "test-v1"
+        assert body["review_status"] == "pending"
+        assert body["chunks"] == 0
+        assert body["version"] is None
 
     def test_ingest_duplicate_returns_409(self, tmp_path):
         load_p, save_p = _with_tmp_docs(tmp_path, [SAMPLE_DOC])
@@ -113,7 +114,6 @@ class TestIngest:
             "published_date",
             "version",
             "license",
-            "review_status",
         ):
             payload = dict(SAMPLE_DOC)
             payload.pop(field)
@@ -138,7 +138,8 @@ class TestIngest:
         with load_p, save_p, _mock_rebuild(tmp_path):
             resp = client.post(
                 "/knowledge/docs/test-doc/review",
-                json={"action": "approve", "reviewer": "admin", "change_reason": "复核通过"},
+                json={"action": "approve", "change_reason": "复核通过"},
+                headers={"X-MedPilot-Reviewer": "admin"},
             )
 
         assert resp.status_code == 200
@@ -153,7 +154,8 @@ class TestIngest:
         ) as rebuild:
             resp = client.post(
                 "/knowledge/docs/test-doc/review",
-                json={"action": "reject", "reviewer": "admin", "change_reason": "来源不足"},
+                json={"action": "reject", "change_reason": "来源不足"},
+                headers={"X-MedPilot-Reviewer": "admin"},
             )
 
         assert resp.status_code == 200

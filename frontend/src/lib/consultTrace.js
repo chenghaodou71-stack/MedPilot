@@ -37,6 +37,10 @@ export function createConsultTraceState() {
     symptoms: null,
     evidence: [],
     triage: null,
+    // The compose payload is trusted only as the expected stream target. It is
+    // intentionally kept separate from `answer` until the terminal event.
+    expectedAnswer: null,
+    streamedAnswerText: '',
     answer: null,
     citations: [],
     followup: null,
@@ -50,6 +54,41 @@ function requiredString(value, field) {
     throw new ConsultTraceProtocolError(`${field} 缺失或无效。`)
   }
   return value
+}
+
+function cloneJson(value) {
+  if (Array.isArray(value)) return value.map((item) => cloneJson(item))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneJson(item)]))
+  }
+  return value
+}
+
+function jsonValuesEqual(left, right) {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((item, index) => jsonValuesEqual(item, right[index]))
+  }
+  if (left && typeof left === 'object' && right && typeof right === 'object') {
+    const leftKeys = Object.keys(left).sort()
+    const rightKeys = Object.keys(right).sort()
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => key === rightKeys[index]
+        && jsonValuesEqual(left[key], right[key]))
+  }
+  return false
+}
+
+function validateAnswer(value, field = 'answer') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ConsultTraceProtocolError(`${field} 必须是对象。`)
+  }
+  if (typeof value.text !== 'string' || !value.text.trim()) {
+    throw new ConsultTraceProtocolError(`${field}.text 缺失或无效。`)
+  }
 }
 
 function validateEnvelope(current, event) {
@@ -120,8 +159,11 @@ function updateCompletedData(next, node, data) {
     return
   }
   if (node === 'compose') {
-    next.answer = data.answer || null
-    next.citations = resolveCitations(next.evidence, data.answer?.citations)
+    validateAnswer(data.answer)
+    next.expectedAnswer = cloneJson(data.answer)
+    next.streamedAnswerText = ''
+    next.answer = null
+    next.citations = resolveCitations(next.evidence, data.answer.citations)
     return
   }
   if (node === 'ask_followup') {
@@ -202,12 +244,53 @@ export function reduceConsultTraceEvent(current, event) {
     next.error = event.data.detail || event.detail || '问诊服务执行失败。'
     return next
   }
+  if (event.type === 'answer_delta') {
+    if (event.status !== 'streaming') {
+      throw new ConsultTraceProtocolError('answer_delta status 必须是 streaming。')
+    }
+    if (event.state.phase !== 'composing') {
+      throw new ConsultTraceProtocolError('answer_delta phase 必须是 composing。')
+    }
+    const dataKeys = Object.keys(event.data)
+    if (dataKeys.length !== 1 || dataKeys[0] !== 'delta') {
+      throw new ConsultTraceProtocolError('answer_delta data 只能包含 delta。')
+    }
+    if (typeof event.data.delta !== 'string' || !event.data.delta.trim()) {
+      throw new ConsultTraceProtocolError('answer_delta data.delta 必须是非空字符串。')
+    }
+    if (current.status === 'error'
+      || next.nodes.compose?.status !== 'done'
+      || Object.values(next.nodes).some((node) => node.status === 'running')
+      || !next.expectedAnswer?.text) {
+      throw new ConsultTraceProtocolError('answer_delta 必须紧跟已完成的 compose 节点。')
+    }
+    const streamedAnswerText = `${current.streamedAnswerText}${event.data.delta}`
+    if (!next.expectedAnswer.text.startsWith(streamedAnswerText)) {
+      throw new ConsultTraceProtocolError('answer_delta 内容与 compose 预期答案不一致。')
+    }
+    next.streamedAnswerText = streamedAnswerText
+    return next
+  }
   if (event.type === 'done') {
     if (event.status !== 'completed' || !['completed', 'escalated'].includes(event.state.phase)) {
       throw new ConsultTraceProtocolError('done 事件终态无效。')
     }
     if (Object.values(next.nodes).some((node) => node.status === 'running')) {
       throw new ConsultTraceProtocolError('存在未结束节点时不能 done。')
+    }
+    const finalAnswer = event.data.answer
+    if (next.expectedAnswer) {
+      validateAnswer(finalAnswer, 'done.data.answer')
+      if (!jsonValuesEqual(next.expectedAnswer, finalAnswer)) {
+        throw new ConsultTraceProtocolError('done.data.answer 与 compose 预期答案不一致。')
+      }
+      if (!next.streamedAnswerText || next.streamedAnswerText !== finalAnswer.text) {
+        throw new ConsultTraceProtocolError('answer_delta 拼接结果与最终 answer.text 不一致。')
+      }
+      next.answer = cloneJson(finalAnswer)
+      next.citations = resolveCitations(next.evidence, finalAnswer.citations)
+    } else if (finalAnswer !== undefined && finalAnswer !== null) {
+      throw new ConsultTraceProtocolError('无 compose 答案时 done 不能携带 answer。')
     }
     next.status = 'done'
     next.awaitingFollowup = Boolean(next.followup) && !next.answer

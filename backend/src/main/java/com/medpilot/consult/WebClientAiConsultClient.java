@@ -6,8 +6,10 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -25,9 +27,20 @@ public class WebClientAiConsultClient implements AiConsultClient {
             String text,
             String sessionId,
             Map<String, String> healthContext) {
+        return openConsult(text, sessionId, healthContext, List.of())
+                .flatMapMany(body -> body);
+    }
+
+    @Override
+    public Mono<Flux<String>> openConsult(
+            String text,
+            String sessionId,
+            Map<String, String> healthContext,
+            List<HistoryMessage> history) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("text", text);
         payload.put("session_id", sessionId);
+        payload.put("history", history == null ? List.of() : List.copyOf(history));
         if (healthContext != null && !healthContext.isEmpty()) {
             payload.put("health_context", Map.copyOf(healthContext));
         }
@@ -36,6 +49,9 @@ public class WebClientAiConsultClient implements AiConsultClient {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .retrieve()
-                .bodyToFlux(String.class);
+                .toEntityFlux(String.class)
+                .map(response -> response.getBody() == null
+                        ? Flux.empty()
+                        : response.getBody());
     }
 }

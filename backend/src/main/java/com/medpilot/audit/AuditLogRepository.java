@@ -12,13 +12,15 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     @Query("""
             select a from AuditLog a
             where (:actor is null or :actor = '' or a.actorUsername = :actor)
-              and (:status is null or a.status = :status)
+              and (:statusMin is null or a.status >= :statusMin)
+              and (:statusMax is null or a.status <= :statusMax)
               and (:fromTime is null or a.createdAt >= :fromTime)
               and (:toTime is null or a.createdAt <= :toTime)
             order by a.createdAt desc
             """)
     Page<AuditLog> search(@Param("actor") String actor,
-                          @Param("status") Integer status,
+                          @Param("statusMin") Integer statusMin,
+                          @Param("statusMax") Integer statusMax,
                           @Param("fromTime") Instant fromTime,
                           @Param("toTime") Instant toTime,
                           Pageable pageable);

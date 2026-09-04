@@ -45,8 +45,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         try {
             String username = jwtService.extractUsername(token);
             String role = jwtService.extractRole(token);
+            long tokenVersion = jwtService.extractTokenVersion(token);
             User user = users.findByUsername(username).orElse(null);
-            if (user == null || !user.isActive() || !user.getRole().name().equals(role)) {
+            if (user == null || !user.isLoginEligibleAt(java.time.Instant.now())
+                    || !user.getRole().name().equals(role)
+                    || user.getTokenVersion() != tokenVersion) {
                 filterChain.doFilter(request, response);
                 return;
             }

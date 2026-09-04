@@ -30,7 +30,7 @@ public class ConsultationAttachment {
     @Column(name = "storage_key", nullable = false, unique = true, length = 64)
     private String storageKey;
 
-    @Column(name = "original_filename", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "original_filename", nullable = false, columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String originalFilename;
 
@@ -51,11 +51,11 @@ public class ConsultationAttachment {
     @Column(nullable = false, length = 32)
     private AttachmentStatus status;
 
-    @Column(name = "extracted_text", columnDefinition = "TEXT")
+    @Column(name = "extracted_text", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String extractedText;
 
-    @Column(name = "draft_text", columnDefinition = "TEXT")
+    @Column(name = "draft_text", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String draftText;
 

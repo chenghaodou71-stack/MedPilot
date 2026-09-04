@@ -1,5 +1,7 @@
 package com.medpilot.consult;
 
+import com.medpilot.clinicalreview.ClinicalReviewRepository;
+import com.medpilot.clinicalreview.ClinicalReviewStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +12,8 @@ import org.springframework.test.context.ActiveProfiles;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import(ConsultationPersistenceService.class)
+@Import({ConsultationPersistenceService.class, ConsultationMessageService.class,
+        ConsultTestObjectMapperConfig.class})
 @ActiveProfiles("test")
 class ConsultationPersistenceServiceTest {
 
@@ -32,10 +35,18 @@ class ConsultationPersistenceServiceTest {
     @Autowired
     ConsultationRecordRepository records;
 
+    @Autowired
+    ConsultationMessageRepository messages;
+
+    @Autowired
+    ClinicalReviewRepository clinicalReviews;
+
     @BeforeEach
     void clear() {
+        clinicalReviews.deleteAll();
         records.deleteAll();
         traces.deleteAll();
+        messages.deleteAll();
     }
 
     @Test
@@ -52,6 +63,10 @@ class ConsultationPersistenceServiceTest {
         assertThat(record.getSymptoms()).isEqualTo("咳嗽");
         assertThat(record.getSupportScore()).isEqualTo(0.74);
         assertThat(record.getExplanation()).contains("证据");
+        assertThat(clinicalReviews.findByConsultationRecordId(record.getId()))
+                .get()
+                .extracting(review -> review.getStatus())
+                .isEqualTo(ClinicalReviewStatus.PENDING_REVIEW);
     }
 
     @Test

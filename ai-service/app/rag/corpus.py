@@ -1,6 +1,8 @@
 """Reviewed, traceable public-health corpus for MedPilot's four specialties."""
 from __future__ import annotations
 
+from app.rag.official_corpus_additions import ADDITIONAL_CORPUS
+
 
 CORPUS: tuple[dict[str, str], ...] = (
     {
@@ -140,3 +142,7 @@ CORPUS: tuple[dict[str, str], ...] = (
         ),
     },
 )
+
+# Keep the original reviewed seed entries first so existing citation IDs stay
+# stable, then append the expanded official-source collection.
+CORPUS = CORPUS + ADDITIONAL_CORPUS

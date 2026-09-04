@@ -78,7 +78,7 @@ class ConsultationRecordIntegrationTest {
     }
 
     @Test
-    void adminSeesAllRecords() throws Exception {
+    void administratorSeesOnlyOwnRecordsWithoutAClinicalRelationship() throws Exception {
         ConsultationRecord r1 = new ConsultationRecord(2L, "sess-user");
         r1.setSymptoms("头痛");
         recordRepo.save(r1);
@@ -87,10 +87,11 @@ class ConsultationRecordIntegrationTest {
         r2.setSymptoms("胸痛");
         recordRepo.save(r2);
 
-        // admin 能看到全量
+        // 管理员不再获得患者记录的无边界读取权限。
         mvc.perform(get("/api/records").cookie(adminCookie))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.length()").value(2));
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].symptoms").value("胸痛"));
     }
 
     @Test
@@ -135,6 +136,84 @@ class ConsultationRecordIntegrationTest {
                         .cookie(userCookie))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(1));
+    }
+
+    @Test
+    void combinesRecordAndSessionIdentifiersSymptomsDepartmentEndTimeAndPagination() throws Exception {
+        ConsultationRecord target = new ConsultationRecord(
+                2L, "1779673a-c983-47e4-9715-f2d9548f469a");
+        target.setSymptoms("持续头痛三天");
+        target.setDepartment("神经内科");
+        recordRepo.saveAndFlush(target);
+
+        ConsultationRecord otherSymptom = new ConsultationRecord(
+                2L, "2779673a-c983-47e4-9715-f2d9548f469a");
+        otherSymptom.setSymptoms("咳嗽");
+        otherSymptom.setDepartment("呼吸内科");
+        recordRepo.saveAndFlush(otherSymptom);
+
+        String start = Instant.now().minus(1, ChronoUnit.HOURS).toString();
+        String end = Instant.now().plus(1, ChronoUnit.HOURS).toString();
+        mvc.perform(get("/api/records")
+                        .param("id", target.getId().toString())
+                        .param("sessionId", "1779673a")
+                        .param("symptoms", "头痛")
+                        .param("department", "神经内科")
+                        .param("startTime", start)
+                        .param("endTime", end)
+                        .param("page", "0")
+                        .param("size", "1")
+                        .cookie(userCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(target.getId()))
+                .andExpect(jsonPath("$.meta.page").value(0))
+                .andExpect(jsonPath("$.meta.size").value(1))
+                .andExpect(jsonPath("$.meta.total").value(1))
+                .andExpect(jsonPath("$.meta.pages").value(1));
+    }
+
+    @Test
+    void paginatesOnTheServerAndRejectsUnboundedPageSizes() throws Exception {
+        for (int index = 0; index < 3; index++) {
+            ConsultationRecord record = new ConsultationRecord(2L, "session-" + index);
+            record.setSymptoms("头痛" + index);
+            recordRepo.save(record);
+        }
+
+        mvc.perform(get("/api/records?page=1&size=2").cookie(userCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.meta.total").value(3))
+                .andExpect(jsonPath("$.meta.pages").value(2));
+
+        mvc.perform(get("/api/records?page=0&size=101").cookie(userCookie))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void keywordSearchMatchesRecordIdSessionSymptomsOrDepartmentOnTheServer() throws Exception {
+        ConsultationRecord target = new ConsultationRecord(
+                2L, "1779673a-c983-47e4-9715-f2d9548f469a");
+        target.setSymptoms("持续偏头痛");
+        target.setDepartment("神经内科");
+        recordRepo.saveAndFlush(target);
+        ConsultationRecord other = new ConsultationRecord(
+                2L, "2779673a-c983-47e4-9715-f2d9548f469a");
+        other.setSymptoms("持续咳嗽");
+        other.setDepartment("呼吸内科");
+        recordRepo.saveAndFlush(other);
+
+        mvc.perform(get("/api/records").param("query", "偏头痛").cookie(userCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].id").value(target.getId()));
+
+        mvc.perform(get("/api/records").param("keyword", target.getId().toString())
+                        .cookie(userCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].sessionId").value(target.getSessionId()));
     }
 
     @Test
@@ -194,13 +273,12 @@ class ConsultationRecordIntegrationTest {
     }
 
     @Test
-    void adminCanAccessAnyDetail() throws Exception {
+    void administratorCannotAccessAnotherUsersRecordWithoutAClinicalRelationship() throws Exception {
         ConsultationRecord r = new ConsultationRecord(2L, "sess-user-data");
         r.setSymptoms("咳嗽");
         recordRepo.save(r);
 
         mvc.perform(get("/api/records/" + r.getId()).cookie(adminCookie))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.symptoms").value("咳嗽"));
+                .andExpect(status().isForbidden());
     }
 }

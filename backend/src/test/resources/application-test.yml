@@ -17,13 +17,18 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
 
 medpilot:
+  redis:
+    enabled: false
+    required: false
+    key-hmac-secret: test-redis-hmac-secret-0123456789
+  identity:
+    local-password-login-enabled: true
+    oidc:
+      enabled: false
   ai-service-token: test-ai-service-token
   data-encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   jwt:

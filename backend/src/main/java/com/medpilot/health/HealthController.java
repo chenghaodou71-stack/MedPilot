@@ -2,6 +2,8 @@ package com.medpilot.health;
 
 import com.medpilot.common.ApiResponse;
 import com.medpilot.config.AiServiceClientConfig;
+import com.medpilot.runtime.RedisRuntimeState;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,15 +20,46 @@ import java.util.Map;
 public class HealthController {
 
     private final WebClient aiClient;
+    private final RedisRuntimeState sharedState;
 
+    /** Constructor retained for focused unit tests that only exercise AI health. */
     public HealthController(
-            @Qualifier(AiServiceClientConfig.CLIENT_BEAN) WebClient aiClient) {
+            WebClient aiClient) {
+        this(aiClient, null);
+    }
+
+    @Autowired
+    public HealthController(
+            @Qualifier(AiServiceClientConfig.CLIENT_BEAN) WebClient aiClient,
+            RedisRuntimeState sharedState) {
         this.aiClient = aiClient;
+        this.sharedState = sharedState;
     }
 
     @GetMapping("/health")
-    public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("backend", "ok"));
+    public ResponseEntity<ApiResponse<Map<String, Object>>> health() {
+        boolean redisRequired = sharedState != null && sharedState.isRequired();
+        boolean redisConfigured = sharedState == null
+                || !sharedState.shouldUseSharedState()
+                || sharedState.isEnabled();
+        boolean redisAvailable = sharedState == null || sharedState.isAvailable();
+        boolean ready = !redisRequired || (redisConfigured && redisAvailable);
+
+        Map<String, Object> redis = Map.of(
+                "ok", redisAvailable && redisConfigured,
+                "required", redisRequired,
+                "configured", redisConfigured,
+                "status", !redisConfigured
+                        ? "hmac_secret_missing"
+                        : (redisAvailable ? "online" : "unavailable"));
+        Map<String, Object> data = Map.of(
+                "backend", ready ? "ok" : "degraded",
+                "shared_state", redis);
+        if (!ready) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(ApiResponse.fail("shared Redis state is unavailable", data));
+        }
+        return ResponseEntity.ok(ApiResponse.ok(data));
     }
 
     /** 全链路验证：backend -> ai-service /health。 */

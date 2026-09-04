@@ -41,6 +41,7 @@ class MonitorTraceIntegrationTest {
     @Autowired ConsultationRecordRepository records;
     @Autowired UserRepository users;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired LiveTraceRegistry liveTraces;
 
     private Cookie adminCookie;
     private Cookie userCookie;
@@ -70,7 +71,13 @@ class MonitorTraceIntegrationTest {
                 "[{\"sequence\":1,\"type\":\"done\"}]",
                 true,
                 "completed",
-                false
+                false,
+                null,
+                null,
+                "[]",
+                false,
+                null,
+                630L
         );
         persistence.persist(2L, "headache", "{}", completed);
 
@@ -147,10 +154,44 @@ class MonitorTraceIntegrationTest {
                 .andExpect(jsonPath("$.data.totalTraces").value(2))
                 .andExpect(jsonPath("$.data.failedTraces").value(1))
                 .andExpect(jsonPath("$.data.timeoutTraces").value(1))
+                .andExpect(jsonPath("$.data.averageDurationMs").value(630.0))
                 .andExpect(jsonPath("$.data.errorCodes.inference_timeout").value(1))
                 .andExpect(jsonPath("$.data.nodes.extract.count").value(1))
                 .andExpect(jsonPath("$.data.nodes.extract.averageDurationMs").value(120.0))
                 .andExpect(jsonPath("$.data.nodes.retrieve.errorCount").value(1));
+    }
+
+    @Test
+    void exposesActiveTraceSnapshotsThroughLiveAndTraceEndpoints() throws Exception {
+        String liveTraceId = "4c293933-6590-4bfc-b0e8-507d3063c90b";
+        LiveTraceRegistry.Handle handle = liveTraces.start(
+                "3779673a-c983-47e4-9715-f2d9548f469a", 2L);
+        liveTraces.publish(handle, liveTraceId,
+                "{\"type\":\"node\",\"node\":\"extract\",\"status\":\"started\"}");
+
+        mvc.perform(get("/api/monitor/live").cookie(auditorCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].traceId",
+                        org.hamcrest.Matchers.hasItem(liveTraceId)))
+                .andExpect(jsonPath("$.data[*].status",
+                        org.hamcrest.Matchers.hasItem("active")));
+
+        mvc.perform(get("/api/monitor/trace/" + liveTraceId).cookie(auditorCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.traceId").value(liveTraceId))
+                .andExpect(jsonPath("$.data.status").value("active"))
+                .andExpect(jsonPath("$.data.events[0].node").value("extract"));
+    }
+
+    @Test
+    void reportsANullAverageDurationWhenNoCompletedTraceMatchesTheWindow() throws Exception {
+        mvc.perform(get("/api/monitor/stats")
+                        .param("startTime", java.time.Instant.now().plusSeconds(3600).toString())
+                        .cookie(adminCookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.completedTraces").value(0))
+                .andExpect(jsonPath("$.data.averageDurationMs")
+                        .value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

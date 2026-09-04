@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../api/client', () => ({ default: api }))
 
-import { useAuthStore } from './auth'
+import { roleHome, roleHomeName, useAuthStore } from './auth'
 
 describe('auth store', () => {
   beforeEach(() => {
@@ -42,6 +42,24 @@ describe('auth store', () => {
     auth.setSession({ username: 'auditor', role: 'AUDITOR' })
     expect(auth.canAccess(['ADMIN', 'AUDITOR'])).toBe(true)
     expect(auth.canAccess(['ADMIN', 'KNOWLEDGE_EDITOR', 'REVIEWER'])).toBe(false)
+  })
+
+  it('maps every role to a deterministic home and exposes derived access flags', () => {
+    expect(roleHome('ADMIN')).toBe('/dashboard')
+    expect(roleHomeName('AUDITOR')).toBe('dashboard')
+    expect(roleHome('DOCTOR')).toBe('/knowledge')
+    expect(roleHomeName('REVIEWER')).toBe('knowledge')
+    expect(roleHome('USER')).toBe('/consult')
+    expect(roleHomeName('unknown')).toBe('consult')
+
+    const auth = useAuthStore()
+    auth.setSession({ username: 'admin', role: 'ADMIN' })
+    expect(auth.isAdmin).toBe(true)
+    expect(auth.hasManagementAccess).toBe(true)
+    expect(auth.homePath).toBe('/dashboard')
+    auth.setSession(null)
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.hasManagementAccess).toBe(false)
   })
 
   it('uses the cookie login profile and ignores any legacy token field', async () => {
@@ -98,5 +116,37 @@ describe('auth store', () => {
 
     expect(auth.isAuthenticated).toBe(false)
     expect(auth.initialized).toBe(true)
+  })
+
+  it('does not repeat a session probe after initialization', async () => {
+    const auth = useAuthStore()
+    auth.setSession({ username: 'alice', role: 'USER' })
+
+    await expect(auth.restoreSession()).resolves.toBe(true)
+    expect(api.get).not.toHaveBeenCalled()
+  })
+
+  it('rejects invalid login envelopes and restores a profile when login omits it', async () => {
+    const auth = useAuthStore()
+    api.post.mockResolvedValueOnce({ data: { success: false, error: 'denied' } })
+    await expect(auth.login('alice', 'wrong')).rejects.toThrow('denied')
+
+    api.post.mockResolvedValueOnce({ data: { success: true, data: {} } })
+    api.get.mockResolvedValueOnce({
+      data: { success: true, data: { username: 'alice', role: 'USER' } },
+    })
+    await expect(auth.login('alice', 'correct-password')).resolves.toBeUndefined()
+    expect(auth.username).toBe('alice')
+    expect(auth.role).toBe('USER')
+  })
+
+  it('fails closed when login succeeds but the follow-up session probe is invalid', async () => {
+    const auth = useAuthStore()
+    api.post.mockResolvedValue({ data: { success: true, data: {} } })
+    api.get.mockResolvedValue({ data: { success: true, data: {} } })
+
+    await expect(auth.login('alice', 'correct-password'))
+      .rejects.toThrow('Unable to restore the authenticated session')
+    expect(auth.isAuthenticated).toBe(false)
   })
 })

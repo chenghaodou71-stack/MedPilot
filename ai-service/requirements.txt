@@ -6,3 +6,5 @@ langgraph==0.2.28
 langchain-core==0.3.10
 faiss-cpu==1.8.0
 numpy==1.26.4
+pypdf==5.9.0
+redis==5.2.1

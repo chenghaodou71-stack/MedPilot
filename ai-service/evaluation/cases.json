@@ -8,5 +8,9 @@
   {"case_id": "RF07", "text": "外伤后大出血", "gold_red_flags": ["大出血"], "gold_department": "急诊科", "gold_risk": "高"},
   {"case_id": "RF08", "text": "持续气促", "gold_red_flags": ["气促"], "gold_department": "呼吸内科", "gold_risk": "高"},
   {"case_id": "N01", "text": "最近有点乏力", "gold_red_flags": [], "gold_department": "全科/建议线下分诊台", "gold_risk": "低"},
-  {"case_id": "N02", "text": "没有胸痛，也没有呼吸困难", "gold_red_flags": [], "gold_department": "全科/建议线下分诊台", "gold_risk": "低"}
+  {"case_id": "N02", "text": "没有胸痛，也没有呼吸困难", "gold_red_flags": [], "gold_department": "全科/建议线下分诊台", "gold_risk": "低"},
+  {"case_id": "RAG01", "text": "夜间反复喘息咳嗽，运动后更明显", "gold_evidence_ids": ["resp-asthma-overview#0"]},
+  {"case_id": "RAG02", "text": "长期咳嗽咳痰，活动后气短", "gold_evidence_ids": ["resp-copd-overview#0"]},
+  {"case_id": "RAG03", "text": "餐后反酸烧心，平卧时更明显", "gold_evidence_ids": ["gast-reflux-symptoms#0"]},
+  {"case_id": "RAG04", "text": "皮肤反复瘙痒干燥并有红斑脱屑", "gold_evidence_ids": ["derm-atopic-eczema#0"]}
 ]

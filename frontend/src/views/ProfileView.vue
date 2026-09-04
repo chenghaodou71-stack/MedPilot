@@ -7,7 +7,6 @@ import {
   Check,
   ClipboardPlus,
   Clock3,
-  FileHeart,
   HeartPulse,
   Plus,
   RefreshCw,

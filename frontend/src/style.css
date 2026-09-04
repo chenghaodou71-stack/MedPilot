@@ -270,7 +270,7 @@
 }
 
 :root[data-workspace="admin"] {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }

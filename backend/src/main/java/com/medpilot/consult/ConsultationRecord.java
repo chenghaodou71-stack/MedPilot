@@ -16,13 +16,28 @@ public class ConsultationRecord {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "patient_mpi_id", length = 128)
+    private String patientMpiId;
+
+    @Column(name = "encounter_number", length = 128)
+    private String encounterNumber;
+
+    @Column(name = "organization_code", length = 64)
+    private String organizationCode;
+
+    @Column(name = "campus_code", length = 64)
+    private String campusCode;
+
+    @Column(name = "encounter_department_code", length = 64)
+    private String encounterDepartmentCode;
+
     @Column(name = "session_id", nullable = false, length = 64)
     private String sessionId;
 
     @Column(name = "trace_id", unique = true, length = 36)
     private String traceId;
 
-    @Column(name = "symptoms", columnDefinition = "TEXT")
+    @Column(name = "symptoms", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String symptoms;
 
@@ -47,23 +62,23 @@ public class ConsultationRecord {
     @Column(name = "matched_rule", length = 128)
     private String matchedRule;
 
-    @Column(name = "triage_factors", columnDefinition = "TEXT")
+    @Column(name = "triage_factors", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String triageFactors;
 
-    @Column(name = "explanation", columnDefinition = "TEXT")
+    @Column(name = "explanation", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String explanation;
 
-    @Column(name = "answer", columnDefinition = "TEXT")
+    @Column(name = "answer", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String answer;
 
-    @Column(name = "citations", columnDefinition = "TEXT")
+    @Column(name = "citations", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String citations;
 
-    @Column(name = "conversation_history", columnDefinition = "TEXT")
+    @Column(name = "conversation_history", columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String conversationHistory;
 
@@ -81,6 +96,11 @@ public class ConsultationRecord {
 
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
+    public String getPatientMpiId() { return patientMpiId; }
+    public String getEncounterNumber() { return encounterNumber; }
+    public String getOrganizationCode() { return organizationCode; }
+    public String getCampusCode() { return campusCode; }
+    public String getEncounterDepartmentCode() { return encounterDepartmentCode; }
     public String getSessionId() { return sessionId; }
     public String getTraceId() { return traceId; }
     public String getSymptoms() { return symptoms; }
@@ -98,7 +118,27 @@ public class ConsultationRecord {
     public String getConversationHistory() { return conversationHistory; }
     public Instant getCreatedAt() { return createdAt; }
 
+    public boolean hasPatientContext() {
+        return isPresent(patientMpiId)
+                && isPresent(organizationCode)
+                && isPresent(campusCode)
+                && isPresent(encounterDepartmentCode);
+    }
+
     public void setSymptoms(String symptoms) { this.symptoms = symptoms; }
+    public void setPatientContext(
+            String patientMpiId,
+            String encounterNumber,
+            String organizationCode,
+            String campusCode,
+            String encounterDepartmentCode) {
+        this.patientMpiId = requiredCode(patientMpiId, 128, "patient MPI id");
+        this.encounterNumber = requiredCode(encounterNumber, 128, "encounter number");
+        this.organizationCode = requiredCode(organizationCode, 64, "organization code");
+        this.campusCode = requiredCode(campusCode, 64, "campus code");
+        this.encounterDepartmentCode = requiredCode(
+                encounterDepartmentCode, 64, "encounter department code");
+    }
     public void setTraceId(String traceId) { this.traceId = traceId; }
     public void setDepartment(String department) { this.department = department; }
     public void setRiskLevel(String riskLevel) { this.riskLevel = riskLevel; }
@@ -112,4 +152,16 @@ public class ConsultationRecord {
     public void setAnswer(String answer) { this.answer = answer; }
     public void setCitations(String citations) { this.citations = citations; }
     public void setConversationHistory(String conversationHistory) { this.conversationHistory = conversationHistory; }
+
+    private static boolean isPresent(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String requiredCode(String value, int maxLength, String field) {
+        String normalized = value == null ? "" : value.strip();
+        if (normalized.isEmpty() || normalized.length() > maxLength) {
+            throw new IllegalArgumentException(field + " is required and too long");
+        }
+        return normalized;
+    }
 }

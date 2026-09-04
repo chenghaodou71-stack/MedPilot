@@ -4,6 +4,7 @@ import client from '../api/client'
 export const MANAGEMENT_ROLES = Object.freeze({
   dashboard: Object.freeze(['ADMIN', 'AUDITOR']),
   knowledge: Object.freeze(['ADMIN', 'KNOWLEDGE_EDITOR', 'REVIEWER', 'DOCTOR']),
+  reviews: Object.freeze(['REVIEWER', 'DOCTOR']),
   monitor: Object.freeze(['ADMIN', 'AUDITOR']),
   users: Object.freeze(['ADMIN']),
   audit: Object.freeze(['ADMIN', 'AUDITOR']),
@@ -30,7 +31,9 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => !!state.username && !!state.role,
     isAdmin: (state) => state.role === 'ADMIN',
-    canAccess: (state) => (roles = []) => state.role === 'ADMIN' || roles.includes(state.role),
+    // Each navigation/API boundary owns its role list. Do not let the
+    // administrator role implicitly cross a clinical responsibility boundary.
+    canAccess: (state) => (roles = []) => roles.includes(state.role),
     hasManagementAccess: (state) => state.role === 'ADMIN'
       || Object.values(MANAGEMENT_ROLES).some((roles) => roles.includes(state.role)),
     homePath: (state) => roleHome(state.role),

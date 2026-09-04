@@ -85,6 +85,7 @@ async def test_returned_evidence_carries_source_and_score():
                              index=index, chunks=chunks)
     ev = results[0]
     assert ev.source == "皮肤" and ev.doc_id == "d1"
+    assert ev.source_type == "text"
     assert isinstance(ev.score, float)
     assert ev.chunk_id == "d1#0"
     assert ev.citation_id == ev.chunk_id
@@ -156,6 +157,79 @@ async def test_retrieve_uses_configured_similarity_threshold_by_default(monkeypa
     assert await retrieve(
         "query", embed_fn=orthogonal_embed, index=index, chunks=chunks
     ) == []
+
+
+@pytest.mark.unit
+async def test_hybrid_retrieval_promotes_lexical_match_when_dense_scores_tie():
+    index = faiss.IndexFlatIP(2)
+    index.add(np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32"))
+    chunks = [
+        Chunk(
+            chunk_id="generic#0",
+            doc_id="generic",
+            department="呼吸内科",
+            source="test",
+            text="需要观察一般不适。",
+        ),
+        Chunk(
+            chunk_id="match#0",
+            doc_id="match",
+            department="呼吸内科",
+            source="test",
+            text="气短时需要记录活动后呼吸困难。",
+        ),
+    ]
+
+    async def tied_embed(_text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    results = await retrieve(
+        "气短",
+        top_k=1,
+        embed_fn=tied_embed,
+        index=index,
+        chunks=chunks,
+        min_score=0.2,
+    )
+
+    assert [item.citation_id for item in results] == ["match#0"]
+
+
+@pytest.mark.unit
+async def test_vector_weight_zero_disables_lexical_reranking():
+    index = faiss.IndexFlatIP(2)
+    index.add(np.array([[1.0, 0.0], [1.0, 0.0]], dtype="float32"))
+    chunks = [
+        Chunk(
+            chunk_id="generic#0",
+            doc_id="generic",
+            department="呼吸内科",
+            source="test",
+            text="需要观察一般不适。",
+        ),
+        Chunk(
+            chunk_id="match#0",
+            doc_id="match",
+            department="呼吸内科",
+            source="test",
+            text="气短时需要记录活动后呼吸困难。",
+        ),
+    ]
+
+    async def tied_embed(_text: str) -> list[float]:
+        return [1.0, 0.0]
+
+    results = await retrieve(
+        "气短",
+        top_k=1,
+        embed_fn=tied_embed,
+        index=index,
+        chunks=chunks,
+        min_score=0.2,
+        vector_weight=1.0,
+    )
+
+    assert [item.citation_id for item in results] == ["generic#0"]
 
 
 @pytest.mark.unit

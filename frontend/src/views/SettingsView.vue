@@ -31,12 +31,10 @@ const defaultSettings = {
   notifications: {
     consultationComplete: true,
     safetyAlerts: true,
-    knowledgeUpdates: false,
   },
   privacy: { ...DEFAULT_PRIVACY_SETTINGS },
   appearance: {
     density: 'standard',
-    theme: 'medical-light',
   },
 }
 
@@ -54,31 +52,18 @@ const densityDescription = computed(() => ({
   standard: '平衡信息密度与阅读舒适度',
   relaxed: '更宽松的内容间距，适合长时间阅读',
 }[settings.appearance.density]))
-const themeMeta = computed(() => (settings.appearance.theme === 'medical-dark'
-  ? {
-      name: '深色控制台',
-      description: '管理视图采用高密度、低眩光的数据控制台',
-      summary: '深色、聚焦、高信息密度',
-    }
-  : {
-      name: '明亮医疗',
-      description: '患者服务采用明亮、可信、低刺激的医疗界面',
-      summary: '明亮、安静、可信',
-    }))
 
 function normalizeSettings(stored) {
   return {
     notifications: {
       consultationComplete: stored?.notifications?.consultationComplete !== false,
       safetyAlerts: true,
-      knowledgeUpdates: stored?.notifications?.knowledgeUpdates === true,
     },
     privacy: normalizePrivacySettings(stored?.privacy),
     appearance: {
       density: ['compact', 'standard', 'relaxed'].includes(stored?.appearance?.density)
         ? stored.appearance.density
         : 'standard',
-      theme: stored?.appearance?.theme === 'medical-dark' ? 'medical-dark' : 'medical-light',
     },
   }
 }
@@ -233,13 +218,6 @@ onMounted(loadSettings)
                 <el-switch v-model="settings.notifications.safetyAlerts" disabled aria-label="安全与急症提示" />
               </div>
             </div>
-            <div class="settings-row">
-              <div>
-                <strong>医学知识更新</strong>
-                <span>本地知识库新增健康科普内容时提示</span>
-              </div>
-              <el-switch v-model="settings.notifications.knowledgeUpdates" aria-label="医学知识更新通知" />
-            </div>
           </div>
         </section>
 
@@ -308,26 +286,6 @@ onMounted(loadSettings)
               <small>{{ densityDescription }}</small>
             </label>
 
-            <label>
-              <span>工作台主题</span>
-              <el-select v-model="settings.appearance.theme" aria-label="工作台主题">
-                <el-option label="明亮医疗" value="medical-light" />
-                <el-option label="深色控制台" value="medical-dark" />
-              </el-select>
-              <small>{{ themeMeta.description }}</small>
-            </label>
-          </div>
-
-          <div
-            class="settings-theme-preview"
-            :class="`settings-theme-preview--${settings.appearance.theme}`"
-            :aria-label="`${themeMeta.name}主题预览`"
-          >
-            <span></span><span></span><span></span><span></span>
-            <div>
-              <strong>{{ themeMeta.name }}</strong>
-              <small>{{ themeMeta.summary }}</small>
-            </div>
           </div>
         </section>
 
@@ -383,7 +341,6 @@ onMounted(loadSettings)
 .settings-row,
 .settings-row__control,
 .settings-privacy-note,
-.settings-theme-preview,
 .settings-account,
 .settings-session > div,
 .settings-logout,
@@ -572,8 +529,7 @@ onMounted(loadSettings)
   gap: 8px;
 }
 
-.settings-fields small,
-.settings-theme-preview small {
+.settings-fields small {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
@@ -581,76 +537,6 @@ onMounted(loadSettings)
 
 .settings-fields :deep(.el-select) {
   width: 100%;
-}
-
-.settings-theme-preview {
-  position: relative;
-  gap: 8px;
-  margin: 0 20px 20px;
-  padding: 14px;
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: 7px;
-}
-
-.settings-theme-preview--medical-light {
-  border-color: #d3dfe2;
-  background: #f3f7f8;
-  color: #17343d;
-}
-
-.settings-theme-preview--medical-light small {
-  color: #6b8189;
-}
-
-.settings-theme-preview--medical-dark {
-  border-color: rgba(128, 190, 246, 0.2);
-  background:
-    linear-gradient(135deg, rgba(104, 196, 255, 0.09), transparent 46%, rgba(192, 133, 255, 0.08)),
-    #050b18;
-  color: #edf2f7;
-}
-
-.settings-theme-preview--medical-dark small {
-  color: #95a2af;
-}
-
-.settings-theme-preview > span {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px #d9e2ec;
-}
-
-.settings-theme-preview--medical-dark > span {
-  border-color: #1b242e;
-  box-shadow: 0 0 0 1px #526173;
-}
-
-.settings-theme-preview > span:nth-child(1) { background: #1677ff; }
-.settings-theme-preview > span:nth-child(2) { background: #00a870; }
-.settings-theme-preview > span:nth-child(3) { background: #722ed1; }
-.settings-theme-preview > span:nth-child(4) { background: #f53f3f; }
-
-.settings-theme-preview--medical-dark > span:nth-child(1) { background: #69a7ff; }
-.settings-theme-preview--medical-dark > span:nth-child(2) { background: #4bd6a5; }
-.settings-theme-preview--medical-dark > span:nth-child(3) { background: #b99ae8; }
-.settings-theme-preview--medical-dark > span:nth-child(4) { background: #ff737d; }
-
-.settings-theme-preview > div {
-  min-width: 0;
-  margin-left: 5px;
-}
-
-.settings-theme-preview strong,
-.settings-theme-preview small {
-  display: block;
-}
-
-.settings-theme-preview strong {
-  font-size: 12px;
 }
 
 .settings-account {
@@ -773,10 +659,6 @@ onMounted(loadSettings)
     flex-direction: column;
     gap: 10px;
     padding: 14px 0;
-  }
-
-  .settings-theme-preview {
-    flex-wrap: wrap;
   }
 }
 </style>

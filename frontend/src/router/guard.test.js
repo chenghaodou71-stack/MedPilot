@@ -14,6 +14,27 @@ function createAuth(overrides = {}) {
 }
 
 describe('guardRoute', () => {
+  it('restores an uninitialized session before evaluating a public route', async () => {
+    const auth = createAuth({ initialized: false })
+
+    await expect(guardRoute({
+      name: 'faq',
+      fullPath: '/faq',
+      meta: { public: true },
+    }, auth)).resolves.toBe(true)
+    expect(auth.restoreSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('redirects an authenticated user away from login to the role home', async () => {
+    const auth = createAuth({ isAuthenticated: true, role: 'AUDITOR' })
+
+    await expect(guardRoute({
+      name: 'login',
+      fullPath: '/login',
+      meta: { public: true },
+    }, auth)).resolves.toEqual({ name: 'dashboard' })
+  })
+
   it('redirects a signed-out user to login and preserves a safe route', async () => {
     const auth = createAuth()
 
@@ -77,6 +98,26 @@ describe('guardRoute', () => {
     }, auth)).resolves.toBe(true)
   })
 
+  it.each(['DOCTOR', 'REVIEWER'])('allows %s to enter the clinical review route', async (role) => {
+    const auth = createAuth({ isAuthenticated: true, role })
+
+    await expect(guardRoute({
+      name: 'clinical-reviews',
+      fullPath: '/clinical-reviews',
+      meta: { roles: ['REVIEWER', 'DOCTOR'] },
+    }, auth)).resolves.toBe(true)
+  })
+
+  it('keeps administrators out of the clinical review route', async () => {
+    const auth = createAuth({ isAuthenticated: true, role: 'ADMIN' })
+
+    await expect(guardRoute({
+      name: 'clinical-reviews',
+      fullPath: '/clinical-reviews',
+      meta: { roles: ['REVIEWER', 'DOCTOR'] },
+    }, auth)).resolves.toEqual({ name: 'dashboard' })
+  })
+
   it('keeps knowledge editors out of the dashboard', async () => {
     const auth = createAuth({ isAuthenticated: true, role: 'KNOWLEDGE_EDITOR' })
 
@@ -110,5 +151,19 @@ describe('guardRoute', () => {
       fullPath: '/monitor',
       meta: { roles: ['ADMIN', 'AUDITOR'] },
     }, auth)).resolves.toEqual({ name: 'knowledge' })
+  })
+
+  it('supports the legacy admin metadata and ordinary authenticated routes', async () => {
+    const user = createAuth({ isAuthenticated: true, role: 'USER' })
+    await expect(guardRoute({
+      name: 'users',
+      fullPath: '/users',
+      meta: { admin: true },
+    }, user)).resolves.toEqual({ name: 'consult' })
+    await expect(guardRoute({
+      name: 'consult',
+      fullPath: '/consult',
+      meta: {},
+    }, user)).resolves.toBe(true)
   })
 })

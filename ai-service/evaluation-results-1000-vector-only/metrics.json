@@ -1,0 +1,334 @@
+{
+  "benchmark": {
+    "name": "MedPilot 1000-case synthetic engineering benchmark",
+    "generator_version": "medpilot-benchmark-1000-v1",
+    "seed": 20260831,
+    "case_count": 1000,
+    "data_boundary": "固定种子生成的人工构造工程测试集，不是临床病例或临床验证数据"
+  },
+  "case_distribution": {
+    "high_risk": 320,
+    "evidence_triage": 320,
+    "low_evidence": 200,
+    "insufficient_followup": 160
+  },
+  "safety": {
+    "support": 320,
+    "recall": 0.8,
+    "false_negatives": 64,
+    "non_high_support": 680,
+    "false_positives": 0,
+    "specificity": 1.0,
+    "by_flag": {
+      "胸痛": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "呼吸困难": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "气促": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "咯血": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "便血": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "晕厥": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "意识不清": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      },
+      "大出血": {
+        "support": 40,
+        "recall": 0.8,
+        "misses": 8
+      }
+    }
+  },
+  "department": {
+    "support": 520,
+    "labels": [
+      "心血管内科",
+      "呼吸内科",
+      "消化内科",
+      "皮肤科",
+      "全科/建议线下分诊台"
+    ],
+    "macro_f1": 0.5793,
+    "accuracy": 0.5827,
+    "per_label": {
+      "心血管内科": {
+        "precision": 0.5614,
+        "recall": 0.8,
+        "f1": 0.6598,
+        "support": 80
+      },
+      "呼吸内科": {
+        "precision": 0.7273,
+        "recall": 1.0,
+        "f1": 0.8421,
+        "support": 80
+      },
+      "消化内科": {
+        "precision": 0.5442,
+        "recall": 1.0,
+        "f1": 0.7048,
+        "support": 80
+      },
+      "皮肤科": {
+        "precision": 0.5302,
+        "recall": 0.9875,
+        "f1": 0.69,
+        "support": 80
+      },
+      "全科/建议线下分诊台": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 200
+      }
+    },
+    "confusion_matrix": [
+      [
+        64,
+        2,
+        6,
+        8,
+        0
+      ],
+      [
+        0,
+        80,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        80,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        79,
+        0
+      ],
+      [
+        50,
+        28,
+        60,
+        62,
+        0
+      ]
+    ],
+    "supported_only": {
+      "support": 320,
+      "labels": [
+        "心血管内科",
+        "呼吸内科",
+        "消化内科",
+        "皮肤科"
+      ],
+      "macro_f1": 0.9452,
+      "accuracy": 0.9469,
+      "per_label": {
+        "心血管内科": {
+          "precision": 1.0,
+          "recall": 0.8,
+          "f1": 0.8889,
+          "support": 80
+        },
+        "呼吸内科": {
+          "precision": 0.9756,
+          "recall": 1.0,
+          "f1": 0.9877,
+          "support": 80
+        },
+        "消化内科": {
+          "precision": 0.9195,
+          "recall": 1.0,
+          "f1": 0.9581,
+          "support": 80
+        },
+        "皮肤科": {
+          "precision": 0.908,
+          "recall": 0.9875,
+          "f1": 0.9461,
+          "support": 80
+        }
+      }
+    }
+  },
+  "risk": {
+    "support": 840,
+    "labels": [
+      "低",
+      "中",
+      "高"
+    ],
+    "macro_f1": 0.5323,
+    "accuracy": 0.6857,
+    "per_label": {
+      "低": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 200
+      },
+      "中": {
+        "precision": 0.5479,
+        "recall": 1.0,
+        "f1": 0.708,
+        "support": 320
+      },
+      "高": {
+        "precision": 1.0,
+        "recall": 0.8,
+        "f1": 0.8889,
+        "support": 320
+      }
+    }
+  },
+  "retrieval": {
+    "support": 320,
+    "evidence_return_rate": 1.0,
+    "recall_at_3": 0.6531,
+    "mrr_at_3": 0.5651
+  },
+  "fallback_and_followup": {
+    "low_evidence_support": 200,
+    "low_evidence_abstain_rate": 0.0,
+    "followup_support": 160,
+    "followup_trigger_rate": 1.0
+  },
+  "perturbation_metrics": [
+    {
+      "level": 0,
+      "name": "P0 规范表达",
+      "safety_recall": 1.0,
+      "department_accuracy": 0.9688,
+      "abstain_rate": 0.0,
+      "followup_trigger_rate": 1.0,
+      "sample_sizes": {
+        "high_risk": 64,
+        "evidence_triage": 64,
+        "low_evidence": 40,
+        "insufficient_followup": 32
+      }
+    },
+    {
+      "level": 1,
+      "name": "P1 口语与同义表达",
+      "safety_recall": 1.0,
+      "department_accuracy": 0.9688,
+      "abstain_rate": 0.0,
+      "followup_trigger_rate": 1.0,
+      "sample_sizes": {
+        "high_risk": 64,
+        "evidence_triage": 64,
+        "low_evidence": 40,
+        "insufficient_followup": 32
+      }
+    },
+    {
+      "level": 2,
+      "name": "P2 组合与背景干扰",
+      "safety_recall": 1.0,
+      "department_accuracy": 0.9375,
+      "abstain_rate": 0.0,
+      "followup_trigger_rate": 1.0,
+      "sample_sizes": {
+        "high_risk": 64,
+        "evidence_triage": 64,
+        "low_evidence": 40,
+        "insufficient_followup": 32
+      }
+    },
+    {
+      "level": 3,
+      "name": "P3 否定与跨症状干扰",
+      "safety_recall": 1.0,
+      "department_accuracy": 0.9219,
+      "abstain_rate": 0.0,
+      "followup_trigger_rate": 1.0,
+      "sample_sizes": {
+        "high_risk": 64,
+        "evidence_triage": 64,
+        "low_evidence": 40,
+        "insufficient_followup": 32
+      }
+    },
+    {
+      "level": 4,
+      "name": "P4 错别字与未登录改写",
+      "safety_recall": 0.0,
+      "department_accuracy": 0.9375,
+      "abstain_rate": 0.0,
+      "followup_trigger_rate": 1.0,
+      "sample_sizes": {
+        "high_risk": 64,
+        "evidence_triage": 64,
+        "low_evidence": 40,
+        "insufficient_followup": 32
+      }
+    }
+  ],
+  "latency_by_task": {
+    "high_risk": {
+      "count": 320,
+      "p50_ms": 0.016,
+      "p95_ms": 777.875,
+      "mean_ms": 203.657
+    },
+    "evidence_triage": {
+      "count": 320,
+      "p50_ms": 642.376,
+      "p95_ms": 945.94,
+      "mean_ms": 651.489
+    },
+    "low_evidence": {
+      "count": 200,
+      "p50_ms": 615.883,
+      "p95_ms": 955.342,
+      "mean_ms": 634.125
+    },
+    "insufficient_followup": {
+      "count": 160,
+      "p50_ms": 0.012,
+      "p95_ms": 0.019,
+      "mean_ms": 0.014
+    }
+  },
+  "errors": {
+    "count": 0,
+    "case_ids": []
+  },
+  "execution": {
+    "completed_at_utc": "2026-09-03T08:07:26.767172+00:00",
+    "python": "3.11.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "embedding_model": "bge-m3",
+    "retrieval_top_k": 3
+  }
+}

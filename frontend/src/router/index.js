@@ -14,9 +14,11 @@ const routes = [
   { path: '/faq', name: 'faq', component: () => import('../views/FaqView.vue'), meta: { title: 'FAQ', workspace: 'patient' } },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: 'Settings', workspace: 'patient' } },
   { path: '/knowledge', name: 'knowledge', component: () => import('../views/KnowledgeView.vue'), meta: { title: 'Knowledge base', roles: ['ADMIN', 'KNOWLEDGE_EDITOR', 'REVIEWER', 'DOCTOR'], workspace: 'admin' } },
+  { path: '/clinical-reviews', name: 'clinical-reviews', component: () => import('../views/ClinicalReviewView.vue'), meta: { title: 'Clinical review', roles: ['REVIEWER', 'DOCTOR'], workspace: 'admin' } },
   { path: '/monitor', name: 'monitor', component: () => import('../views/MonitorView.vue'), meta: { title: 'Agent monitor', roles: ['ADMIN', 'AUDITOR'], workspace: 'admin' } },
   { path: '/users', name: 'users', component: () => import('../views/AdminUsersView.vue'), meta: { title: 'User access', roles: ['ADMIN'], workspace: 'admin' } },
   { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue'), meta: { title: 'Audit log', roles: ['ADMIN', 'AUDITOR'], workspace: 'admin' } },
+  { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { title: 'Page not found', public: true, workspace: 'login' } },
 ]
 
 const router = createRouter({

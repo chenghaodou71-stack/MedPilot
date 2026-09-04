@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @RestController
@@ -28,12 +29,16 @@ public class AuditLogController {
     public ApiResponse<List<Map<String, Object>>> logs(
             @RequestParam(required = false) String actor,
             @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) String statusGroup,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         validatePage(page, size);
-        var result = repository.search(actor, status, from, to,
+        int[] statusRange = resolveStatusRange(status, statusGroup);
+        Integer statusMin = statusRange == null ? null : statusRange[0];
+        Integer statusMax = statusRange == null ? null : statusRange[1];
+        var result = repository.search(actor, statusMin, statusMax, from, to,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
         List<Map<String, Object>> rows = result.getContent().stream().map(this::payload).toList();
         Map<String, Object> meta = new LinkedHashMap<>();
@@ -47,7 +52,7 @@ public class AuditLogController {
     public ResponseEntity<String> export(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
-        var result = repository.search(null, null, from, to,
+        var result = repository.search(null, null, null, from, to,
                 PageRequest.of(0, 10_000, Sort.by(Sort.Direction.ASC, "createdAt")));
         StringBuilder csv = new StringBuilder("event_id,actor_role,action,status,success,created_at,duration_ms\n");
         result.getContent().forEach(log -> csv.append(row(log.getEventId(), log.getActorRole(), log.getAction(),
@@ -79,5 +84,26 @@ public class AuditLogController {
         if (page < 0 || size < 1 || size > 200) {
             throw new IllegalArgumentException("page must be non-negative and size must be between 1 and 200");
         }
+    }
+
+    private int[] resolveStatusRange(Integer status, String statusGroup) {
+        String group = statusGroup == null ? "" : statusGroup.strip().toLowerCase(Locale.ROOT);
+        if (status != null && !group.isEmpty()) {
+            throw new IllegalArgumentException("status and statusGroup cannot be combined");
+        }
+        if (status != null) {
+            if (status < 100 || status > 599) {
+                throw new IllegalArgumentException("status must be between 100 and 599");
+            }
+            return new int[] {status, status};
+        }
+        return switch (group) {
+            case "" -> null;
+            case "success" -> new int[] {200, 399};
+            case "client_error" -> new int[] {400, 499};
+            case "server_error" -> new int[] {500, 599};
+            default -> throw new IllegalArgumentException(
+                    "statusGroup must be success, client_error or server_error");
+        };
     }
 }

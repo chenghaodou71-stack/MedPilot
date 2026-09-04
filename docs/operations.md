@@ -39,3 +39,9 @@ $env:SPRING_PROFILES_ACTIVE = 'prod'
 ## 医疗安全边界
 
 图片和音频只生成“待确认草稿”，不会直接进入分诊结论。文本附件仅提取有限 UTF-8/PDF 文本并标注来源；用户确认前不得作为症状事实写入问诊请求。任何高风险命中仍以安全快速通道和人工/急救建议为优先。
+
+## 模型与知识变更
+
+生产预检要求 `MEDPILOT_RUNTIME_MODE=clinical|production`，并校验模型权重 SHA-256、制品签名、提示词/嵌入/知识索引版本和 `FROZEN` 发布状态。模型发布还必须有通过的 `/api/governance/rollback-drills` 证据（恢复时长和数据完整性检查）。任何权重、提示词、嵌入模型或知识索引变化都应新建 `/api/governance/changes` 记录，完成独立审批、验证证据和回滚计划后再执行；禁止覆盖既有冻结版本。
+
+医院本地制度和国内主管部门资料先登记到知识来源台账，默认 `PENDING`，临床复核通过且未过期后才允许进入索引。提示词注入、恶意附件和 PHI 外泄红队测试、漂移/GPU 容量快照、错误分诊事故及 CAPA 均保存在 MySQL 治理表中。完整闸门和证据包见 [模型、知识库与变更治理](model-knowledge-change-governance.md)。

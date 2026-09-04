@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 import java.util.Optional;
@@ -56,8 +57,8 @@ class ConsultControllerStreamingErrorTest {
 
     @Test
     void mapsAnUpstreamFailureBeforeTheFirstEventToBadGatewayException() {
-        when(aiClient.consult("text", SESSION_ID, Map.of()))
-                .thenReturn(Flux.error(new IllegalStateException("offline")));
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of()))
+                .thenReturn(Mono.error(new IllegalStateException("offline")));
 
         assertThatThrownBy(() -> controller.consult(request(), authentication).block())
                 .isInstanceOf(AiServiceUnavailableException.class)
@@ -67,9 +68,9 @@ class ConsultControllerStreamingErrorTest {
 
     @Test
     void turnsAnUpstreamFailureAfterStreamingStartsIntoAProtocolErrorEvent() throws Exception {
-        when(aiClient.consult("text", SESSION_ID, Map.of())).thenReturn(Flux.concat(
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of())).thenReturn(Mono.just(Flux.concat(
                 Flux.just(nodeStarted()),
-                Flux.error(new IllegalStateException("connection reset"))));
+                Flux.error(new IllegalStateException("connection reset")))));
 
         ResponseEntity<Flux<String>> response = controller.consult(request(), authentication).block();
         List<String> lines = response.getBody().collectList().block();
@@ -86,7 +87,8 @@ class ConsultControllerStreamingErrorTest {
 
     @Test
     void reportsPersistenceFailureInsteadOfSilentlyCompleting() throws Exception {
-        when(aiClient.consult("text", SESSION_ID, Map.of())).thenReturn(Flux.just(done()));
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of()))
+                .thenReturn(Mono.just(Flux.just(done())));
         doThrow(new IllegalStateException("database unavailable"))
                 .when(persistence).persist(anyLong(), any(), any(), any());
 
@@ -102,7 +104,8 @@ class ConsultControllerStreamingErrorTest {
 
     @Test
     void forwardsOneUpstreamTerminalErrorWithoutAppendingAnother() throws Exception {
-        when(aiClient.consult("text", SESSION_ID, Map.of())).thenReturn(Flux.just(error()));
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of()))
+                .thenReturn(Mono.just(Flux.just(error())));
 
         ResponseEntity<Flux<String>> response = controller.consult(request(), authentication).block();
         List<String> lines = response.getBody().collectList().block();
@@ -118,11 +121,11 @@ class ConsultControllerStreamingErrorTest {
     @Test
     void retriesATransientFailureBeforeTheFirstEvent() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
-        when(aiClient.consult("text", SESSION_ID, Map.of())).thenAnswer(invocation -> {
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of())).thenAnswer(invocation -> {
             if (attempts.incrementAndGet() == 1) {
-                return Flux.error(new AiServiceUnavailableException());
+                return Mono.error(new AiServiceUnavailableException());
             }
-            return Flux.just(done());
+            return Mono.just(Flux.just(done()));
         });
 
         ResponseEntity<Flux<String>> response = controller.consult(request(), authentication).block();
@@ -136,10 +139,10 @@ class ConsultControllerStreamingErrorTest {
     @Test
     void neverRetriesAfterAnEventHasBeenEmitted() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
-        when(aiClient.consult("text", SESSION_ID, Map.of())).thenAnswer(invocation -> {
+        when(aiClient.openConsult("text", SESSION_ID, Map.of(), List.of())).thenAnswer(invocation -> {
             attempts.incrementAndGet();
-            return Flux.concat(Flux.just(nodeStarted()),
-                    Flux.error(new IllegalStateException("mid-stream failure")));
+            return Mono.just(Flux.concat(Flux.just(nodeStarted()),
+                    Flux.error(new IllegalStateException("mid-stream failure"))));
         });
 
         ResponseEntity<Flux<String>> response = controller.consult(request(), authentication).block();
@@ -159,11 +162,11 @@ class ConsultControllerStreamingErrorTest {
                 "conditions", "哮喘");
         when(healthProfiles.resolveForUser(2L)).thenReturn(expectedContext);
         AtomicReference<Map<String, String>> receivedContext = new AtomicReference<>();
-        when(aiClient.consult("text", SESSION_ID, expectedContext)).thenAnswer(invocation -> {
+        when(aiClient.openConsult("text", SESSION_ID, expectedContext, List.of())).thenAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             Map<String, String> context = invocation.getArgument(2);
             receivedContext.set(context);
-            return Flux.just(done());
+            return Mono.just(Flux.just(done()));
         });
 
         ResponseEntity<Flux<String>> response = controller.consult(request(), authentication).block();

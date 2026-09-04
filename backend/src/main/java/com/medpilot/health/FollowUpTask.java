@@ -29,11 +29,11 @@ public class FollowUpTask {
     @Column(name = "record_id")
     private Long recordId;
 
-    @Column(nullable = false, columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String title;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String notes;
 

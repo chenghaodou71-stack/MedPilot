@@ -84,6 +84,9 @@ class SecurityHardeningIntegrationTest {
                         .cookie(authCookie))
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("MEDPILOT_AUTH", 0));
+
+        mvc.perform(get("/api/auth/me").cookie(authCookie))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

@@ -60,6 +60,19 @@ const triageFactors = computed(() => normalizeTriageFactors(record.value?.triage
 const supportScoreLabel = computed(() => (
   record.value?.matchedRule ? '规则支持分' : '检索支持度'
 ))
+const reviewPending = computed(() => Boolean(record.value?.reviewRequired))
+
+function reviewStatusLabel(status) {
+  return {
+    PENDING_REVIEW: '等待医生复核',
+    IN_REVIEW: '医生正在复核',
+    EMERGENCY_ESCALATED: '已转急诊人工流程',
+    CLINICIAN_CONFIRMED: '医生已确认 AI 结果',
+    CLINICIAN_MODIFIED: '医生已调整分诊结果',
+    REJECTED: '医生已退回 AI 结果',
+    SYSTEM_FALLBACK: '已由人工流程接管',
+  }[status] || '复核状态待同步'
+}
 
 async function fetchDetail() {
   loading.value = true
@@ -119,6 +132,17 @@ onMounted(fetchDetail)
 
     <template v-else-if="record">
       <el-alert
+        class="record-review-state"
+        :type="record.reviewStatus === 'EMERGENCY_ESCALATED' ? 'error' : (reviewPending ? 'warning' : 'success')"
+        :closable="false"
+        show-icon
+      >
+        <template #title>{{ reviewStatusLabel(record.reviewStatus) }}</template>
+        <p v-if="reviewPending">当前展示为 AI 原始草案，不能替代医生最终分诊决定。</p>
+        <p v-else>医生最终决定与 AI 原始输出分开留存，便于追溯。</p>
+      </el-alert>
+
+      <el-alert
         v-if="record.riskLevel === '高'"
         class="record-high-risk"
         type="error"
@@ -145,11 +169,11 @@ onMounted(fetchDetail)
             <div class="detail-metrics">
               <div class="detail-metric">
                 <span class="detail-metric-icon blue"><el-icon><FirstAidKit /></el-icon></span>
-                <div><small>推荐科室</small><strong>{{ record.department || '--' }}</strong></div>
+                <div><small>AI 推荐科室</small><strong>{{ record.department || '--' }}</strong></div>
               </div>
               <div class="detail-metric">
                 <span class="detail-metric-icon orange"><el-icon><WarningFilled /></el-icon></span>
-                <div><small>风险等级</small><strong>{{ record.riskLevel || '未知' }}</strong></div>
+                <div><small>AI 风险等级</small><strong>{{ record.riskLevel || '未知' }}</strong></div>
               </div>
               <div class="detail-metric">
                 <span class="detail-metric-icon green"><el-icon><DataAnalysis /></el-icon></span>
@@ -157,8 +181,14 @@ onMounted(fetchDetail)
               </div>
               <div class="detail-metric">
                 <span class="detail-metric-icon purple"><el-icon><Clock /></el-icon></span>
-                <div><small>建议就医时效</small><strong>{{ record.urgency || '--' }}</strong></div>
+                <div><small>AI 建议就医时效</small><strong>{{ record.urgency || '--' }}</strong></div>
               </div>
+            </div>
+
+            <div v-if="record.finalDepartment || record.finalRiskLevel || record.finalUrgency" class="clinician-outcome">
+              <div><small>医生最终科室</small><strong>{{ record.finalDepartment || '--' }}</strong></div>
+              <div><small>医生最终风险</small><strong>{{ record.finalRiskLevel || '--' }}</strong></div>
+              <div><small>医生最终时效</small><strong>{{ record.finalUrgency || '--' }}</strong></div>
             </div>
 
             <div class="detail-block">
@@ -320,14 +350,40 @@ onMounted(fetchDetail)
   padding: 28px;
 }
 
-.record-high-risk {
+.record-high-risk,
+.record-review-state {
   margin-bottom: 16px;
 }
 
-.record-high-risk p {
+.record-high-risk p,
+.record-review-state p {
   margin: 4px 0 0;
   font-size: 11px;
 }
+
+.clinician-outcome {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.clinician-outcome > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--success-subtle, var(--border-subtle));
+  border-radius: 6px;
+  background: var(--success-soft);
+}
+
+.clinician-outcome small,
+.clinician-outcome strong {
+  display: block;
+}
+
+.clinician-outcome small { color: var(--text-muted); font-size: 10px; }
+.clinician-outcome strong { margin-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
 
 .record-detail-layout {
   display: grid;

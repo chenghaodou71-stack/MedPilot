@@ -8,9 +8,12 @@ import com.medpilot.config.AiServiceClientConfig;
 import com.medpilot.consult.ConsultationTrace;
 import com.medpilot.consult.ConsultationTraceRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -34,14 +38,26 @@ public class MonitorController {
     private final WebClient aiClient;
     private final ConsultationTraceRepository traceRepository;
     private final ObjectMapper mapper;
+    private final LiveTraceRegistry liveTraces;
 
+    @Autowired
     public MonitorController(
             @Qualifier(AiServiceClientConfig.CLIENT_BEAN) @Lazy WebClient aiClient,
             ConsultationTraceRepository traces,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            LiveTraceRegistry liveTraces) {
         this.aiClient = aiClient;
         this.traceRepository = traces;
         this.mapper = mapper;
+        this.liveTraces = liveTraces;
+    }
+
+    /** Backward-compatible constructor for isolated client configuration tests. */
+    public MonitorController(
+            WebClient aiClient,
+            ConsultationTraceRepository traces,
+            ObjectMapper mapper) {
+        this(aiClient, traces, mapper, new LiveTraceRegistry(mapper));
     }
 
     @GetMapping("/health")
@@ -63,6 +79,10 @@ public class MonitorController {
     public ResponseEntity<ApiResponse<Object>> trace(@PathVariable String traceId) {
         ConsultationTrace trace = traceRepository.findByTraceId(traceId).orElse(null);
         if (trace == null) {
+            LiveTraceRegistry.Snapshot live = liveTraces.find(traceId).orElse(null);
+            if (live != null) {
+                return ResponseEntity.ok(ApiResponse.ok(live));
+            }
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(ApiResponse.fail("Trace not found"));
         }
@@ -84,6 +104,21 @@ public class MonitorController {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("stored trace JSON is invalid", ex);
         }
+    }
+
+    /** Current active and recently terminated in-process traces. */
+    @GetMapping("/live")
+    public ApiResponse<List<LiveTraceRegistry.Snapshot>> live() {
+        return ApiResponse.ok(liveTraces.snapshots());
+    }
+
+    /** Snapshot-first SSE stream; reconnecting clients immediately recover current state. */
+    @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<LiveTraceRegistry.Update>> events() {
+        return liveTraces.stream().map(update -> ServerSentEvent.builder(update)
+                .id(Long.toString(update.id()))
+                .event(update.kind())
+                .build());
     }
 
     /** Paginated, read-only trace summaries for administrators and auditors. */
@@ -149,11 +184,18 @@ public class MonitorController {
                 .toList();
 
         long failed = selected.stream().filter(item -> "failed".equals(item.status())).count();
+        long cancelled = selected.stream()
+                .filter(item -> "cancelled".equals(item.status()))
+                .count();
+        List<ParsedTrace> completed = selected.stream()
+                .filter(item -> "completed".equals(item.status()))
+                .toList();
         long timeoutCount = selected.stream()
                 .filter(item -> isTimeout(item.failureCode()))
                 .count();
         Map<String, Integer> errorCodes = new LinkedHashMap<>();
         selected.stream()
+                .filter(item -> "failed".equals(item.status()))
                 .map(ParsedTrace::failureCode)
                 .filter(code -> code != null && !code.isBlank())
                 .forEach(code -> errorCodes.merge(code, 1, Integer::sum));
@@ -165,9 +207,16 @@ public class MonitorController {
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("totalTraces", selected.size());
-        data.put("completedTraces", selected.size() - failed);
+        data.put("completedTraces", completed.size());
         data.put("failedTraces", failed);
+        data.put("cancelledTraces", cancelled);
         data.put("timeoutTraces", timeoutCount);
+        data.put("averageDurationMs", completed.isEmpty()
+                ? null
+                : completed.stream()
+                        .mapToLong(item -> totalDuration(item.trace(), item.events()))
+                        .average()
+                        .orElse(0.0));
         data.put("errorCodes", errorCodes);
         data.put("errors", errorCodes);
         data.put("nodes", nodes);
@@ -196,6 +245,7 @@ public class MonitorController {
     }
 
     private String statusOf(ConsultationTrace trace, JsonNode events) {
+        if ("cancelled".equalsIgnoreCase(trace.getTerminalPhase())) return "cancelled";
         return "failed".equalsIgnoreCase(trace.getTerminalPhase())
                 || failureCodeOf(trace, events) != null ? "failed" : "completed";
     }

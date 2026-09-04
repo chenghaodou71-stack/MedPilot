@@ -34,6 +34,42 @@ function Get-RequiredCommand {
     return $command.Source
 }
 
+function Test-SpringBootJar {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            $manifestEntry = $archive.GetEntry('META-INF/MANIFEST.MF')
+            if ($null -eq $manifestEntry) {
+                return $false
+            }
+
+            $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
+            try {
+                $manifest = $reader.ReadToEnd()
+            }
+            finally {
+                $reader.Dispose()
+            }
+        }
+        finally {
+            $archive.Dispose()
+        }
+
+        return ($manifest -match '(?m)^Main-Class:\s*org\.springframework\.boot\.loader\.launch\.JarLauncher\s*$') -and `
+            ($manifest -match '(?m)^Start-Class:\s*com\.medpilot\.MedPilotApplication\s*$')
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-ManagedProcesses {
     if (-not (Test-Path -LiteralPath $StateFile)) {
         return @()
@@ -195,18 +231,26 @@ if (-not (Test-Path -LiteralPath $ViteExe)) {
 $JavaExe = Get-RequiredCommand 'java.exe'
 $NpmExe = Get-RequiredCommand 'npm.cmd'
 
-if ($Rebuild -or -not (Test-Path -LiteralPath $BackendJar)) {
+$backendJarReady = Test-SpringBootJar -Path $BackendJar
+if ($Rebuild -or -not $backendJarReady) {
+    if (-not $Rebuild -and (Test-Path -LiteralPath $BackendJar)) {
+        Write-Warning 'Existing backend JAR is not a Spring Boot executable; rebuilding it.'
+    }
     $MavenExe = Get-RequiredCommand 'mvn.cmd'
     Write-Step 'Building Spring Boot backend...'
     Push-Location $BackendDir
     try {
-        & $MavenExe package -DskipTests
+        & $MavenExe clean package -DskipTests
         if ($LASTEXITCODE -ne 0) {
             throw "Maven build failed with exit code $LASTEXITCODE."
         }
     }
     finally {
         Pop-Location
+    }
+
+    if (-not (Test-SpringBootJar -Path $BackendJar)) {
+        throw "Maven build completed, but the backend JAR is not a runnable Spring Boot archive: $BackendJar"
     }
 }
 

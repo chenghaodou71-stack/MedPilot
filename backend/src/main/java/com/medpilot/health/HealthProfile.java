@@ -23,7 +23,7 @@ public class HealthProfile {
     @Column(name = "user_id", nullable = false, unique = true)
     private Long userId;
 
-    @Column(name = "profile_json", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "profile_json", nullable = false, columnDefinition = "LONGTEXT")
     @Convert(converter = EncryptedStringConverter.class)
     private String profileJson;
 

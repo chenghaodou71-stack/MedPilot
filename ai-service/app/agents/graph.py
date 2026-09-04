@@ -170,20 +170,30 @@ _NODE_LABELS = {
     "compose": "回答编排",
 }
 
+_ANSWER_DELTA_CHARS = 16
+
+
+def _answer_deltas(text: str) -> tuple[str, ...]:
+    """Split an already validated answer without changing its content."""
+    return tuple(
+        text[offset:offset + _ANSWER_DELTA_CHARS]
+        for offset in range(0, len(text), _ANSWER_DELTA_CHARS)
+    )
+
 
 def _serialize_update(node: str, update: dict[str, Any]) -> dict[str, Any]:
     """把节点状态更新转成可 JSON 序列化的事件 payload。"""
     payload: dict[str, Any] = {}
     if "symptoms" in update:
-        payload["symptoms"] = update["symptoms"].model_dump()
+        payload["symptoms"] = update["symptoms"].model_dump(mode="json")
     if "followup" in update:
-        payload["followup"] = update["followup"].model_dump()
+        payload["followup"] = update["followup"].model_dump(mode="json")
     if "evidence" in update:
-        payload["evidence"] = [e.model_dump() for e in update["evidence"]]
+        payload["evidence"] = [e.model_dump(mode="json") for e in update["evidence"]]
     if "triage" in update:
-        payload["triage"] = update["triage"].model_dump()
+        payload["triage"] = update["triage"].model_dump(mode="json")
     if "answer" in update:
-        payload["answer"] = update["answer"].model_dump()
+        payload["answer"] = update["answer"].model_dump(mode="json")
     return payload
 
 
@@ -233,16 +243,18 @@ async def run_consult_stream(
         yield emitter.emit(
             "node", node="classify", label=_NODE_LABELS["classify"],
             status="completed", phase="triaging",
-            data={"triage": triage.model_dump()},
+            data={"triage": triage.model_dump(mode="json")},
         )
         yield emitter.emit(
             "node", node="compose", label=_NODE_LABELS["compose"],
             status="started", phase="composing",
         )
         terms = "、".join(screening.matched_terms)
+        rule_basis = triage.matched_rule or screening.rule_id or "确定性安全筛查规则"
         answer = ComposedAnswer(
             text=(
-                f"检测到危险信号：{terms}。{triage.urgency}，"
+                f"检测到危险信号：{terms}。依据安全筛查规则“{rule_basis}”，"
+                f"{triage.urgency}，"
                 "请勿自行驾车，尽快由他人陪同就医。"
             ),
             citations=(),
@@ -251,9 +263,21 @@ async def run_consult_stream(
         yield emitter.emit(
             "node", node="compose", label=_NODE_LABELS["compose"],
             status="completed", phase="composing",
-            data={"answer": answer.model_dump()},
+            data={"answer": answer.model_dump(mode="json")},
         )
-        yield emitter.emit("done", status="completed", phase="escalated")
+        for delta in _answer_deltas(answer.text):
+            yield emitter.emit(
+                "answer_delta",
+                status="streaming",
+                phase="composing",
+                data={"delta": delta},
+            )
+        yield emitter.emit(
+            "done",
+            status="completed",
+            phase="escalated",
+            data={"answer": answer.model_dump(mode="json")},
+        )
         return
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -283,11 +307,12 @@ async def run_consult_stream(
         initial["index"] = index
         initial["chunks"] = chunks
     graph_error: BaseException | None = None
+    graph_result: ConsultState | None = None
 
     async def drive_graph() -> None:
-        nonlocal graph_error
+        nonlocal graph_error, graph_result
         try:
-            await _COMPILED.ainvoke(initial)
+            graph_result = await _COMPILED.ainvoke(initial)
         except BaseException as exc:
             graph_error = exc
         finally:
@@ -308,7 +333,25 @@ async def run_consult_stream(
                 data={"detail": "consultation failed"},
             )
             return
-        yield emitter.emit("done", status="completed", phase="completed")
+        done_data: dict[str, Any] = {}
+        if graph_result is not None and graph_result.get("answer") is not None:
+            answer = graph_result["answer"]
+            for delta in _answer_deltas(answer.text):
+                yield emitter.emit(
+                    "answer_delta",
+                    status="streaming",
+                    phase="composing",
+                    data={"delta": delta},
+                )
+            done_data["answer"] = answer.model_dump(mode="json")
+        elif graph_result is not None and graph_result.get("followup") is not None:
+            done_data["followup"] = graph_result["followup"].model_dump(mode="json")
+        yield emitter.emit(
+            "done",
+            status="completed",
+            phase="completed",
+            data=done_data,
+        )
     finally:
         if not task.done():
             task.cancel()

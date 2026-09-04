@@ -12,6 +12,8 @@ import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
 import org.springframework.http.HttpMethod;
 import org.springframework.util.MimeType;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.web.reactive.function.BodyInserter;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.ClientRequest;
@@ -20,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -61,6 +64,56 @@ class WebClientAiConsultClientHealthContextTest {
 
         JsonNode body = new ObjectMapper().readTree(requestBody.get());
         assertThat(body.has("health_context")).isFalse();
+    }
+
+    @Test
+    void sendsExplicitPersistedHistoryWithoutIncludingTheCurrentTurn() throws Exception {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        WebClient client = WebClient.builder()
+                .exchangeFunction(request -> captureBody(request)
+                        .doOnNext(requestBody::set)
+                        .thenReturn(ClientResponse.create(HttpStatus.OK).body("{}\n").build()))
+                .build();
+        List<AiConsultClient.HistoryMessage> history = List.of(
+                new AiConsultClient.HistoryMessage("user", "第一轮症状"),
+                new AiConsultClient.HistoryMessage("assistant", "第一轮追问"));
+
+        new WebClientAiConsultClient(client)
+                .openConsult("当前回答", "session-1", Map.of(), history)
+                .flatMapMany(body -> body)
+                .collectList()
+                .block();
+
+        JsonNode body = new ObjectMapper().readTree(requestBody.get());
+        assertThat(body.path("history")).hasSize(2);
+        assertThat(body.path("history").get(0).path("role").asText()).isEqualTo("user");
+        assertThat(body.path("history").get(1).path("content").asText()).isEqualTo("第一轮追问");
+        assertThat(body.path("history").toString()).doesNotContain("当前回答");
+    }
+
+    @Test
+    void disposingTheResponseBodyCancelsTheUnderlyingWebClientBody() {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        var firstLine = DefaultDataBufferFactory.sharedInstance.wrap(
+                "{}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        reactor.core.publisher.Flux<DataBuffer> responseBody =
+                reactor.core.publisher.Flux.concat(
+                        reactor.core.publisher.Flux.just((DataBuffer) firstLine),
+                        reactor.core.publisher.Flux.never())
+                        .doOnCancel(() -> cancelled.set(true));
+        WebClient client = WebClient.builder()
+                .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
+                        .body(responseBody)
+                        .build()))
+                .build();
+
+        reactor.core.Disposable subscription = new WebClientAiConsultClient(client)
+                .openConsult("text", "session-1", Map.of(), List.of())
+                .flatMapMany(body -> body)
+                .subscribe();
+        subscription.dispose();
+
+        assertThat(cancelled).isTrue();
     }
 
     private Mono<String> captureBody(ClientRequest request) {

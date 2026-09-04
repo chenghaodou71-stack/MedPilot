@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
@@ -21,10 +22,24 @@ from app.ollama_client import (
 from app.rag import retriever
 from app.rag.knowledge_store import load_documents
 from app.rag.index_versions import get_index_health
-from app.runtime import CapacityExceeded, InferenceGate, inference_gate
+from app.runtime import (
+    CapacityExceeded,
+    InferenceGate,
+    inference_gate,
+    redis_inference_gate,
+)
 from app.session import store
+from app.shared_state import RedisSharedState, SharedStateUnavailable
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
+shared_state: RedisSharedState | None = None
+
+
+def configure_shared_state(state: RedisSharedState) -> None:
+    global inference_gate, shared_state
+    shared_state = state
+    if state.client is not None or state.required:
+        inference_gate = redis_inference_gate(state)
 
 
 @router.get("/health")
@@ -62,7 +77,26 @@ async def health() -> dict:
             **index_health,
         },
     }
-    if not ollama_ok or not chat_ok or not embed_ok or not index_health["ok"]:
+    if shared_state is not None and (shared_state.client is not None or shared_state.required):
+        try:
+            redis_ok = await shared_state.require_available()
+        except SharedStateUnavailable:
+            redis_ok = False
+        payload["shared_state"] = {
+            "ok": redis_ok,
+            "status": "online" if redis_ok else "unavailable",
+            "required": shared_state.required,
+        }
+    else:
+        redis_ok = True
+        payload["shared_state"] = {"ok": True, "status": "disabled"}
+    if (
+        not ollama_ok
+        or not chat_ok
+        or not embed_ok
+        or not index_health["ok"]
+        or not redis_ok
+    ):
         return JSONResponse(status_code=503, content=payload)
     return payload
 
@@ -118,6 +152,8 @@ async def trace(req: TraceRequest) -> StreamingResponse:
     gate = inference_gate
     try:
         await gate.acquire()
+    except SharedStateUnavailable as exc:
+        raise HTTPException(status_code=503, detail="shared state unavailable") from exc
     except CapacityExceeded as exc:
         raise HTTPException(status_code=429, detail="inference capacity exceeded") from exc
     return StreamingResponse(
@@ -136,4 +172,6 @@ async def _leased_trace_stream(
         ):
             yield chunk
     finally:
-        gate.release()
+        result = gate.release()
+        if inspect.isawaitable(result):
+            await result

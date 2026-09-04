@@ -1,15 +1,33 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { RefreshCw, ShieldCheck, UserCheck, UserRoundX } from 'lucide-vue-next'
+import {
+  KeyRound,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  UserPlus,
+  UserRoundX,
+} from 'lucide-vue-next'
 import client from '../api/client'
+import { adminUserErrorText, validAdminPassword, validAdminUsername } from '../lib/adminUsers'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const users = ref([])
 const loading = ref(false)
 const updatingId = ref(null)
-const error = ref('')
+const deletingId = ref(null)
+const creating = ref(false)
+const resetting = ref(false)
+const listError = ref('')
+const operationError = ref('')
+const createVisible = ref(false)
+const resetVisible = ref(false)
+const resetTarget = ref(null)
+const createFormRef = ref(null)
+const resetFormRef = ref(null)
 
 const roleOptions = [
   { value: 'USER', label: '患者用户' },
@@ -20,6 +38,41 @@ const roleOptions = [
   { value: 'ADMIN', label: '系统管理员' },
 ]
 
+const createForm = reactive({ username: '', password: '', confirmPassword: '', role: 'USER' })
+const resetForm = reactive({ password: '', confirmPassword: '' })
+
+function validateUsername(_rule, value, callback) {
+  if (validAdminUsername(value)) callback()
+  else callback(new Error('请输入 3-64 位小写字母、数字、点、下划线或连字符'))
+}
+
+function validatePassword(_rule, value, callback) {
+  if (validAdminPassword(value)) callback()
+  else callback(new Error('密码长度必须为 10-128 个字符'))
+}
+
+function validateCreateConfirmation(_rule, value, callback) {
+  if (value === createForm.password) callback()
+  else callback(new Error('两次输入的密码不一致'))
+}
+
+function validateResetConfirmation(_rule, value, callback) {
+  if (value === resetForm.password) callback()
+  else callback(new Error('两次输入的密码不一致'))
+}
+
+const createRules = {
+  username: [{ validator: validateUsername, trigger: 'blur' }],
+  password: [{ validator: validatePassword, trigger: 'blur' }],
+  confirmPassword: [{ validator: validateCreateConfirmation, trigger: 'blur' }],
+  role: [{ required: true, message: '请选择账号职责', trigger: 'change' }],
+}
+
+const resetRules = {
+  password: [{ validator: validatePassword, trigger: 'blur' }],
+  confirmPassword: [{ validator: validateResetConfirmation, trigger: 'blur' }],
+}
+
 const activeCount = computed(() => users.value.filter((user) => user.active).length)
 const roleLabel = (role) => roleOptions.find((item) => item.value === role)?.label || role
 
@@ -27,20 +80,29 @@ function payloadOf(response) {
   return response?.data?.data ?? response?.data
 }
 
-function errorText(errorValue, fallback) {
-  const raw = errorValue?.response?.data?.error || errorValue?.response?.data?.detail
-  return typeof raw === 'string' && raw.trim() ? raw : fallback
+function showOperationError(errorValue, fallback) {
+  operationError.value = adminUserErrorText(errorValue, fallback)
+  ElMessage.error(operationError.value)
+}
+
+function formatCreatedAt(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value || '未记录'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(date)
 }
 
 async function loadUsers() {
   loading.value = true
-  error.value = ''
+  listError.value = ''
   try {
     const response = await client.get('/admin/users')
     const payload = payloadOf(response)
     users.value = Array.isArray(payload) ? payload : []
   } catch (errorValue) {
-    error.value = errorText(errorValue, '用户列表暂时无法加载。')
+    listError.value = adminUserErrorText(errorValue, '用户列表暂时无法加载。')
   } finally {
     loading.value = false
   }
@@ -50,8 +112,9 @@ async function updateUser(user, patch) {
   if (!user?.id || updatingId.value) return
   const next = { ...patch }
   const isSelf = user.username === auth.username
-  if (isSelf && next.active === false) {
-    ElMessage.warning('当前账号不能在自己的会话中被禁用。')
+  if (isSelf && (next.active === false || next.role)) {
+    operationError.value = '不能禁用当前账号或变更自己的管理员职责。'
+    ElMessage.warning(operationError.value)
     return
   }
   try {
@@ -64,6 +127,7 @@ async function updateUser(user, patch) {
     return
   }
 
+  operationError.value = ''
   updatingId.value = user.id
   try {
     const response = await client.patch(`/admin/users/${user.id}`, next)
@@ -72,10 +136,112 @@ async function updateUser(user, patch) {
     if (index >= 0 && updated) users.value[index] = updated
     ElMessage.success('权限已更新')
   } catch (errorValue) {
-    ElMessage.error(errorText(errorValue, '权限更新失败，请稍后重试。'))
+    showOperationError(errorValue, '权限更新失败，请稍后重试。')
     await loadUsers()
   } finally {
     updatingId.value = null
+  }
+}
+
+function openCreate() {
+  operationError.value = ''
+  createVisible.value = true
+}
+
+function resetCreateForm() {
+  Object.assign(createForm, { username: '', password: '', confirmPassword: '', role: 'USER' })
+  createFormRef.value?.clearValidate()
+}
+
+async function createUser() {
+  if (creating.value) return
+  try {
+    await createFormRef.value?.validate()
+  } catch {
+    return
+  }
+
+  creating.value = true
+  operationError.value = ''
+  try {
+    await client.post('/admin/users', {
+      username: createForm.username.trim(),
+      password: createForm.password,
+      role: createForm.role,
+    })
+    ElMessage.success(`账号“${createForm.username.trim()}”已创建`)
+    createVisible.value = false
+    resetCreateForm()
+    await loadUsers()
+  } catch (errorValue) {
+    showOperationError(errorValue, '创建用户失败，请稍后重试。')
+  } finally {
+    creating.value = false
+  }
+}
+
+function openPasswordReset(user) {
+  operationError.value = ''
+  resetTarget.value = user
+  Object.assign(resetForm, { password: '', confirmPassword: '' })
+  resetVisible.value = true
+}
+
+function resetPasswordForm() {
+  Object.assign(resetForm, { password: '', confirmPassword: '' })
+  resetTarget.value = null
+  resetFormRef.value?.clearValidate()
+}
+
+async function resetPassword() {
+  if (!resetTarget.value?.id || resetting.value) return
+  try {
+    await resetFormRef.value?.validate()
+  } catch {
+    return
+  }
+
+  resetting.value = true
+  operationError.value = ''
+  try {
+    await client.patch(`/admin/users/${resetTarget.value.id}`, { password: resetForm.password })
+    ElMessage.success(`账号“${resetTarget.value.username}”的密码已重置，旧会话已失效`)
+    resetVisible.value = false
+    resetPasswordForm()
+  } catch (errorValue) {
+    showOperationError(errorValue, '密码重置失败，请稍后重试。')
+  } finally {
+    resetting.value = false
+  }
+}
+
+async function deleteUser(user) {
+  if (!user?.id || deletingId.value) return
+  if (user.username === auth.username) {
+    operationError.value = '不能删除当前登录账号。'
+    ElMessage.warning(operationError.value)
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `删除“${user.username}”后无法恢复；如有关联问诊记录，服务端将拒绝删除。`,
+      '删除用户',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  deletingId.value = user.id
+  operationError.value = ''
+  try {
+    await client.delete(`/admin/users/${user.id}`)
+    users.value = users.value.filter((item) => item.id !== user.id)
+    ElMessage.success(`账号“${user.username}”已删除`)
+  } catch (errorValue) {
+    showOperationError(errorValue, '删除用户失败，请稍后重试。')
+  } finally {
+    deletingId.value = null
   }
 }
 
@@ -90,13 +256,26 @@ onMounted(loadUsers)
         <h1>用户权限</h1>
         <p>按职责分离访问知识库、监控和审计数据；敏感操作由服务端再次校验。</p>
       </div>
-      <el-button plain :loading="loading" aria-label="刷新用户列表" @click="loadUsers">
-        <RefreshCw :size="16" aria-hidden="true" />
-        刷新
-      </el-button>
+      <div class="usr-header-actions">
+        <el-button type="primary" @click="openCreate">
+          <UserPlus :size="16" aria-hidden="true" />
+          创建用户
+        </el-button>
+        <el-button plain :loading="loading" aria-label="刷新用户列表" @click="loadUsers">
+          <RefreshCw :size="16" aria-hidden="true" />
+          刷新
+        </el-button>
+      </div>
     </header>
 
-    <el-alert v-if="error" type="error" :closable="false" show-icon :title="error" />
+    <el-alert v-if="listError" type="error" :closable="false" show-icon :title="listError" />
+    <el-alert
+      v-if="operationError"
+      type="warning"
+      show-icon
+      :title="operationError"
+      @close="operationError = ''"
+    />
 
     <section class="usr-summary" aria-label="用户统计">
       <div><span>账号总数</span><strong>{{ users.length }}</strong></div>
@@ -146,7 +325,9 @@ onMounted(loadUsers)
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="createdAt" label="创建时间" min-width="190" />
+        <el-table-column label="创建时间" min-width="190">
+          <template #default="scope">{{ formatCreatedAt(scope.row.createdAt) }}</template>
+        </el-table-column>
         <el-table-column label="安全提示" min-width="170">
           <template #default="scope">
             <span class="usr-note" v-if="scope.row.username === auth.username"><ShieldCheck :size="14" /> 当前会话</span>
@@ -154,20 +335,112 @@ onMounted(loadUsers)
             <span class="usr-note usr-note-muted" v-else>{{ roleLabel(scope.row.role) }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="126" fixed="right">
+          <template #default="scope">
+            <div class="usr-row-actions">
+              <el-tooltip content="重置密码" placement="top">
+                <el-button
+                  text
+                  circle
+                  type="primary"
+                  :aria-label="`重置 ${scope.row.username} 的密码`"
+                  @click="openPasswordReset(scope.row)"
+                >
+                  <KeyRound :size="16" aria-hidden="true" />
+                </el-button>
+              </el-tooltip>
+              <el-tooltip :content="scope.row.username === auth.username ? '不能删除当前账号' : '删除用户'" placement="top">
+                <el-button
+                  text
+                  circle
+                  type="danger"
+                  :disabled="scope.row.username === auth.username"
+                  :loading="deletingId === scope.row.id"
+                  :aria-label="`删除用户 ${scope.row.username}`"
+                  @click="deleteUser(scope.row)"
+                >
+                  <Trash2 v-if="deletingId !== scope.row.id" :size="16" aria-hidden="true" />
+                </el-button>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
       </el-table>
     </section>
+
+    <el-dialog
+      v-model="createVisible"
+      title="创建用户"
+      width="min(500px, 94vw)"
+      destroy-on-close
+      :close-on-click-modal="!creating"
+      :close-on-press-escape="!creating"
+      @closed="resetCreateForm"
+    >
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top">
+        <el-form-item label="账号" prop="username">
+          <el-input v-model="createForm.username" maxlength="64" autocomplete="off" placeholder="例如 reviewer-01" />
+        </el-form-item>
+        <el-form-item label="职责" prop="role">
+          <el-select v-model="createForm.role" class="usr-form-control">
+            <el-option v-for="role in roleOptions" :key="`create-${role.value}`" :label="role.label" :value="role.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="初始密码" prop="password">
+          <el-input v-model="createForm.password" type="password" show-password maxlength="128" autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item label="确认密码" prop="confirmPassword">
+          <el-input v-model="createForm.confirmPassword" type="password" show-password maxlength="128" autocomplete="new-password" @keyup.enter="createUser" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="creating" @click="createVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="createUser">
+          <UserPlus v-if="!creating" :size="16" aria-hidden="true" />
+          {{ creating ? '正在创建' : '创建账号' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="resetVisible"
+      :title="`重置 ${resetTarget?.username || ''} 的密码`"
+      width="min(500px, 94vw)"
+      destroy-on-close
+      :close-on-click-modal="!resetting"
+      :close-on-press-escape="!resetting"
+      @closed="resetPasswordForm"
+    >
+      <el-alert class="usr-dialog-alert" type="warning" :closable="false" show-icon title="密码更新后，该账号此前签发的登录令牌会立即失效。" />
+      <el-form ref="resetFormRef" :model="resetForm" :rules="resetRules" label-position="top">
+        <el-form-item label="新密码" prop="password">
+          <el-input v-model="resetForm.password" type="password" show-password maxlength="128" autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input v-model="resetForm.confirmPassword" type="password" show-password maxlength="128" autocomplete="new-password" @keyup.enter="resetPassword" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="resetting" @click="resetVisible = false">取消</el-button>
+        <el-button type="primary" :loading="resetting" @click="resetPassword">
+          <KeyRound v-if="!resetting" :size="16" aria-hidden="true" />
+          {{ resetting ? '正在重置' : '确认重置' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .usr-page { width: min(100%, 1180px); margin: 0 auto; display: grid; gap: 16px; color: var(--text-primary); }
-.usr-header, .usr-panel-heading, .usr-name, .usr-status, .usr-note { display: flex; align-items: center; }
+.usr-header, .usr-header-actions, .usr-panel-heading, .usr-name, .usr-status, .usr-note, .usr-row-actions { display: flex; align-items: center; }
 .usr-header { justify-content: space-between; gap: 20px; padding: 4px 2px 8px; }
+.usr-header-actions { gap: 8px; flex: 0 0 auto; }
 .usr-eyebrow { color: var(--primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .usr-header h1, .usr-panel-heading h2 { margin: 5px 0 4px; letter-spacing: 0; }
 .usr-header h1 { font-size: 25px; }
 .usr-header p, .usr-panel-heading small { margin: 0; color: var(--text-muted); font-size: 13px; }
-.usr-header .el-button { display: inline-flex; align-items: center; gap: 7px; }
+.usr-header .el-button, :deep(.el-dialog__footer .el-button) { display: inline-flex; align-items: center; gap: 7px; }
 .usr-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .usr-summary > div, .usr-panel { border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--glass-surface, var(--surface-elevated)); box-shadow: var(--shadow-card); }
 .usr-summary > div { display: grid; gap: 5px; padding: 15px 17px; }
@@ -181,6 +454,9 @@ onMounted(loadUsers)
 .usr-status { gap: 9px; }
 .usr-note { gap: 5px; color: var(--success); font-size: 12px; }
 .usr-note-muted { color: var(--text-muted); }
+.usr-row-actions { gap: 2px; }
+.usr-form-control { width: 100%; }
+.usr-dialog-alert { margin-bottom: 16px; }
 .usr-table { --el-table-bg-color: transparent; --el-table-tr-bg-color: transparent; --el-table-header-bg-color: var(--surface-muted); --el-table-border-color: var(--border-subtle); }
-@media (max-width: 720px) { .usr-header { align-items: flex-start; flex-direction: column; } .usr-summary { grid-template-columns: 1fr; } .usr-panel { padding: 13px; } .usr-panel-heading { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 720px) { .usr-header { align-items: flex-start; flex-direction: column; } .usr-header-actions { width: 100%; } .usr-header-actions .el-button { flex: 1; } .usr-summary { grid-template-columns: 1fr; } .usr-panel { padding: 13px; } .usr-panel-heading { align-items: flex-start; flex-direction: column; } }
 </style>
